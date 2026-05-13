@@ -38,72 +38,37 @@ ollama run text2sql-local
 - `Modelfile`의 `FROM` 경로는 실제 `gguf` 위치로 맞춰야 합니다.
 - API(OpenAI) 기반 백업 코드는 `backend/backup_api/`에 남겨뒀습니다.
 
-Currently, two official plugins are available:
+## DB 설정
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- 현재 설정은 PostgreSQL을 사용한다는 전제 하에 설정되어 있음. 다른 DB를 사용한다면 `backend/db.py` 파일의 코드 일부를 수정
+- `backend/db.py`에서 DATABASE_URL은 본인 환경에 맞게 수정. 예: `postgresql://postgres:[PASSWORD]@localhost:[포트]/[DB명]`
+- 추가적으로, 현재는 v_courses_info라는 view를 사용하도록 LLM이 설정되어 있기 때문에, DB 내에서 아래 SQL문을 실행하여 View를 설정해야 함.
 
-## React Compiler
+```sql
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+CREATE OR REPLACE VIEW v_course_info AS
+SELECT
+    c.course_year,
+    c.subject_code,
+    c.section,
+    s.subject_name,
+    s.category,
+    s.credit_hours,
+    s.target_year,
+    c.professor,
+    c.capacity,
+    c.enrolled,
+    c.grading_method,
+    c.eval_type,
+    c.class_mode,
+    d.dept_name,
+    sch.day_of_week,
+    sch.start_time,
+    sch.end_time,
+    sch.classroom
+FROM cnu_courses c
+JOIN subject s ON c.subject_code = s.subject_code
+JOIN department d ON c.dept_code = d.dept_code
+LEFT JOIN course_schedule sch ON c.subject_code = sch.subject_code AND c.section = sch.section;
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
