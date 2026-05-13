@@ -1,14 +1,18 @@
 # Course Frontend (+ FastAPI backend)
 
-이 리포지토리는 **Vite(React) 프론트엔드**와 `backend/`의 **FastAPI(text-to-sql) 백엔드**를 함께 담고 있습니다.
+**Vite(React) 프론트엔드**와 `backend/`의 **FastAPI(text-to-sql) 백엔드**
 
 ## 실행 방법 (개발)
 
+- Anaconda 등의 가상환경 이용하여 실행 권장
+
 ### 프론트 + 백엔드 같이 실행
+
+- NodeJS 설정 (Node.js 설치 필요 -> https://nodejs.org/ko/download/)
 
 ```bash
 npm install
-python -m pip install -r backend/requirements.txt
+pip install -r backend/requirements.txt
 npm run dev:full
 ```
 
@@ -26,17 +30,18 @@ npm run dev:full
   - `DATABASE_URL` (예: `postgresql://postgres:1234@localhost:5432/univ`)
   - `REDIS_URL` (선택)
 
-> `DATABASE_URL`이 없으면 `/api/v1/query`는 에러를 반환하지만, 서버는 기동됩니다.
+> `DATABASE_URL`이 없으면 `/api/v1/query`는 에러 DB 부재 에러 반환, SQL 쿼리만 반환함
 
 ### 로컬 모델(Ollama) 준비
 
-```bash
+```bash 
 ollama create text2sql-local -f "C:\충남대\4-1\종합설계\작업\모델\Modelfile"
 ollama run text2sql-local
 ```
 
-- `Modelfile`의 `FROM` 경로는 실제 `gguf` 위치로 맞춰야 합니다.
-- API(OpenAI) 기반 백업 코드는 `backend/backup_api/`에 남겨뒀습니다.
+- `Modelfile`의 `FROM` 경로는 실제 `gguf` 경로로 수정
+- API(OpenAI) 기반 백업 코드는 `backend/backup_api/`에 위치
+- Run상태를 유지할 필요는 없지만, Ollama는 실행되어 있는 상태여야 함
 
 ## DB 설정
 
