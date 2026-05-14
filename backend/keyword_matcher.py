@@ -558,6 +558,42 @@ def find_best_course_phrase_entity(
     return corrected
 
 
+def find_best_category_phrase_entity(
+    query: str,
+    parts: list[dict[str, Any]],
+    references: dict[str, list[str]],
+) -> dict[str, Any] | None:
+    if len(parts) != 2 or not any(part["label"] == "CATEGORY" for part in parts):
+        return None
+
+    start = int(parts[0]["start"])
+    end = int(parts[-1]["end"])
+    text = query[start:end].strip()
+    match = find_alias_match(text, references.get("CATEGORY", []), "CATEGORY")
+    if not match.text:
+        return None
+
+    category_entity = {
+        "text": text,
+        "label": "CATEGORY",
+        "start": start,
+        "end": end,
+        "score": min(float(part.get("score", 0.0)) for part in parts),
+        "merged_from": [
+            {
+                "text": part["text"],
+                "label": part["label"],
+                "start": part["start"],
+                "end": part["end"],
+            }
+            for part in parts
+        ],
+    }
+    corrected = make_corrected_entity(category_entity, match)
+    corrected["match_method"] = f"category_phrase_{corrected['match_method']}"
+    return corrected
+
+
 def correct_ner_entities(
     entities: list[dict[str, Any]],
     references: dict[str, list[str]] | None = None,
@@ -576,6 +612,13 @@ def correct_ner_entities(
                 parts = sorted_entities[i:end_index]
                 if len(parts) < 2:
                     continue
+
+                category_phrase = find_best_category_phrase_entity(query, parts, references)
+                if category_phrase:
+                    corrected_entities.append(category_phrase)
+                    i = end_index
+                    consumed = True
+                    break
 
                 if all(
                     mergeable_entity_gap(query, parts[j], parts[j + 1])
