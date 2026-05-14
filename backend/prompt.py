@@ -26,6 +26,7 @@ Rules:
 - ONLY SELECT
 - USE ONLY the tables and columns listed in the schema above.
 - DO NOT invent or guess table names (e.g., never use 'courses', use 'v_course_info' instead).
+- ALWAYS include all category information mentioned by the user (e.g., '전공', '교양', '전공(핵심)') in the category filter.
 - For string comparisons (like dept_name, subject_name, category), ALWAYS use LIKE '%word%' instead of exact match '='.
 - DO NOT add filters for numeric columns (like credit_hours, course_year) unless the user explicitly mentions a value.
 - If unclear → UNKNOWN
