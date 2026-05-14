@@ -665,7 +665,11 @@ def should_apply_match(entity: dict[str, Any], match: MatchResult) -> bool:
 
     # Very short spans are easy to over-correct unless they are aliases or strong matches.
     if len(source) <= 2 and match.score < 95:
+        if is_single_character_typo(source, target):
+            return True
         if match.method == "sequence" or "shared" in match.method:
+            return True
+        if "share" in match.method:
             return True
         aliases = COMMON_ALIASES.get(label, {})
         return source in aliases
