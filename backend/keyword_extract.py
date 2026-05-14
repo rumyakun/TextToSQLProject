@@ -373,22 +373,6 @@ def collapse_repeated_tokens(value: str) -> str:
     return " ".join(collapsed)
 
 
-def shared_query_text(query: str, matches: list["MatchResult"]) -> str | None:
-    candidates = [
-        variant
-        for variant in make_match_queries(query, "")
-        if len(normalize_for_match(variant)) >= 2
-    ]
-    candidates.sort(key=lambda value: len(normalize_for_match(value)), reverse=True)
-
-    for candidate in candidates:
-        candidate_key = normalize_for_match(candidate)
-        if all(candidate_key in normalize_for_match(item.text or "") for item in matches):
-            return candidate
-
-    return None
-
-
 def exact_containing_matches(query: str, matches: list["MatchResult"]) -> tuple[str, list["MatchResult"]] | None:
     candidates = [
         variant
@@ -410,76 +394,6 @@ def exact_containing_matches(query: str, matches: list["MatchResult"]) -> tuple[
     return None
 
 
-def common_normalized_prefix(values: list[str]) -> str:
-    keys = [normalize_for_match(value) for value in values if normalize_for_match(value)]
-    if not keys:
-        return ""
-
-    prefix = keys[0]
-    for key in keys[1:]:
-        while prefix and not key.startswith(prefix):
-            prefix = prefix[:-1]
-        if not prefix:
-            break
-    return prefix
-
-
-def best_common_normalized_substring(query: str, values: list[str], min_length: int = 2) -> str:
-    keys = [normalize_for_match(value) for value in values if normalize_for_match(value)]
-    if not keys:
-        return ""
-
-    query_key = normalize_for_match(query)
-    shortest = min(keys, key=len)
-    best = ""
-    best_score = 0.0
-
-    for length in range(len(shortest), min_length - 1, -1):
-        for start in range(0, len(shortest) - length + 1):
-            candidate = shortest[start:start + length]
-            if not all(candidate in key for key in keys):
-                continue
-
-            score = 100.0 if is_single_character_typo(query_key, candidate) else float(fuzz.WRatio(query_key, candidate))
-            if score > best_score or (score == best_score and len(candidate) > len(best)):
-                best = candidate
-                best_score = score
-
-    return best
-
-
-def is_single_character_typo(source: str, target: str) -> bool:
-    if len(source) != len(target) or len(source) > 6:
-        return False
-    return sum(left != right for left, right in zip(source, target)) == 1
-
-
-def fuzzy_shared_text(query: str, matches: list["MatchResult"]) -> str | None:
-    values = [item.text or "" for item in matches]
-    shared = common_normalized_prefix(values)
-    query_key = normalize_for_match(query)
-
-    if shared and not (
-        is_single_character_typo(query_key, shared)
-        or fuzz.WRatio(query_key, shared) >= DEFAULT_MIN_SCORE
-    ):
-        shared = ""
-
-    if not shared:
-        shared = best_common_normalized_substring(query, values, min_length=max(2, len(query_key) - 1))
-
-    if len(shared) < 2:
-        return None
-
-    if is_single_character_typo(query_key, shared):
-        return shared
-
-    if fuzz.WRatio(query_key, shared) < DEFAULT_MIN_SCORE:
-        return None
-
-    return shared
-
-
 def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     if not ranked:
         return None
@@ -497,14 +411,6 @@ def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     ]
     if len(near_matches) < 2:
         return None
-
-    shared_text = shared_query_text(best.query, near_matches)
-    if shared_text:
-        return MatchResult(shared_text, best.score, best.query, "ambiguous_shared")
-
-    fuzzy_shared = fuzzy_shared_text(best.query, near_matches)
-    if fuzzy_shared:
-        return MatchResult(fuzzy_shared, best.score, best.query, "ambiguous_fuzzy_shared")
 
     def similarity_to_query(item: MatchResult) -> tuple[float, int]:
         text = item.text or ""
@@ -584,19 +490,11 @@ def find_fuzzy_match(query: str, candidates: list[str], method: str) -> "MatchRe
         shared_text, containing_matches = exact_group
         return MatchResult(shared_text, containing_matches[0].score, query, f"{method}_exact_shared")
 
-    fuzzy_shared = fuzzy_shared_text(query, ranked)
-    if fuzzy_shared:
-        shared_method = "fuzzy_shared" if method == "fuzzy" else f"{method}_shared"
-        return MatchResult(fuzzy_shared, max(best.score, DEFAULT_MIN_SCORE), query, shared_method)
-
     if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
-        ambiguous_match = ambiguous_group_match(ranked)
-        if ambiguous_match:
-            if ambiguous_match.method.startswith("ambiguous_"):
-                ambiguous_match.method = f"{method}_{ambiguous_match.method.removeprefix('ambiguous_')}"
-            else:
-                ambiguous_match.method = f"{method}_ambiguous"
-            return ambiguous_match
+        prefix_match = ambiguous_group_match(ranked)
+        if prefix_match:
+            prefix_match.method = f"{method}_prefix"
+            return prefix_match
         return MatchResult(None, best.score, query, f"{method}_ambiguous")
 
     return best
@@ -665,11 +563,7 @@ def should_apply_match(entity: dict[str, Any], match: MatchResult) -> bool:
 
     # Very short spans are easy to over-correct unless they are aliases or strong matches.
     if len(source) <= 2 and match.score < 95:
-        if is_single_character_typo(source, target):
-            return True
         if match.method == "sequence" or "shared" in match.method:
-            return True
-        if "share" in match.method:
             return True
         aliases = COMMON_ALIASES.get(label, {})
         return source in aliases
