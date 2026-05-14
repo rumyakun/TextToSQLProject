@@ -21,6 +21,10 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "course_custom_ner_model" / "models" / "course-custom-ner"
 REFERENCE_LIMIT = int(os.getenv("KEYWORD_REFERENCE_LIMIT", "20000"))
 DEFAULT_MIN_SCORE = float(os.getenv("KEYWORD_CORRECTION_MIN_SCORE", "78"))
+SEQUENCE_MIN_SCORE = float(os.getenv("KEYWORD_SEQUENCE_MIN_SCORE", "72"))
+SEQUENCE_AMBIGUITY_MARGIN = float(os.getenv("KEYWORD_SEQUENCE_AMBIGUITY_MARGIN", "4"))
+SEQUENCE_MAX_QUERY_LENGTH = int(os.getenv("KEYWORD_SEQUENCE_MAX_QUERY_LENGTH", "6"))
+ORGANIZATION_PREFIX_ENDINGS = ("대학", "학부", "학과", "전공과정", "과정")
 
 ## NER label이 DB의 어느 테이블, 컬럼과 매핑되는지 정의.
 ## 교정된 값이 DB에 존재하는지 확인하기 위함.
@@ -50,8 +54,7 @@ LABEL_MIN_SCORES = {
 COMMON_ALIASES = {
     "DEPARTMENT": {
         "컴공": ["컴퓨터공학과"],
-        "컴융": ["컴퓨터융합학부", "공과대학 컴퓨터융합학부"],
-        "컴융부": ["컴퓨터융합학부", "공과대학 컴퓨터융합학부"],
+        "컴융": ["컴퓨터융합학부"],
         "인공지능": ["컴퓨터인공지능학부"],
     },
     "CATEGORY": {
@@ -106,7 +109,7 @@ def build_postgres_dsn() -> str:
         return database_url
 
     user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "4231")
+    password = os.getenv("POSTGRES_PASSWORD", "postgres")
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     database = os.getenv("POSTGRES_DB", "postgres")
@@ -314,9 +317,6 @@ def make_match_queries(entity_text: str, label: str) -> list[str]:
     particle_stripped = strip_korean_particle(raw)
 
     variants = [raw, particle_stripped, compact]
-    aliases = COMMON_ALIASES.get(label, {})
-    alias_values = aliases.get(raw.lower()) or aliases.get(compact) or []
-    variants.extend(alias_values)
 
     cleaned: list[str] = []
     for variant in variants:
@@ -326,11 +326,181 @@ def make_match_queries(entity_text: str, label: str) -> list[str]:
     return cleaned
 
 
+def get_alias_queries(entity_text: str, label: str) -> list[str]:
+    raw = entity_text.strip().lower()
+    compact = normalize_for_match(entity_text)
+    aliases = COMMON_ALIASES.get(label, {})
+    alias_values = aliases.get(raw) or aliases.get(compact) or []
+    return [value for value in alias_values if value.strip()]
+
+
+def ordered_subsequence_positions(query: str, candidate: str) -> list[int] | None:
+    query_key = normalize_for_match(strip_korean_particle(query))
+    candidate_key = normalize_for_match(candidate)
+    if (
+        len(query_key) < 2
+        or len(query_key) > SEQUENCE_MAX_QUERY_LENGTH
+        or len(query_key) >= len(candidate_key)
+    ):
+        return None
+
+    positions: list[int] = []
+    start = 0
+    for char in query_key:
+        found = candidate_key.find(char, start)
+        if found < 0:
+            return None
+        positions.append(found)
+        start = found + 1
+
+    return positions
+
+
+def sequence_match_score(query: str, candidate: str) -> float:
+    positions = ordered_subsequence_positions(query, candidate)
+    if not positions:
+        return 0.0
+
+    query_key = normalize_for_match(strip_korean_particle(query))
+    candidate_key = normalize_for_match(candidate)
+    span = positions[-1] - positions[0] + 1
+    gap_count = max(span - len(query_key), 0)
+    length_gap = max(len(candidate_key) - len(query_key), 0)
+    prefix_bonus = 6 if positions[0] == 0 else 0
+    score = 100 - (gap_count * 4) - (length_gap * 2) + prefix_bonus
+    return max(0.0, min(100.0, float(score)))
+
+
+def trim_leading_university_name(value: str) -> str:
+    tokens = value.split()
+    if tokens and tokens[0] == "충남대학교":
+        return " ".join(tokens[1:])
+    return value
+
+
+def collapse_repeated_tokens(value: str) -> str:
+    tokens = value.split()
+    collapsed: list[str] = []
+    for token in tokens:
+        if not collapsed or collapsed[-1] != token:
+            collapsed.append(token)
+    return " ".join(collapsed)
+
+
+def common_token_prefix(values: list[str]) -> str | None:
+    if not values:
+        return None
+
+    cleaned = [
+        collapse_repeated_tokens(trim_leading_university_name(value))
+        for value in values
+        if value.strip()
+    ]
+    tokenized = [value.split() for value in cleaned if value.strip()]
+    if not tokenized:
+        return None
+
+    prefix: list[str] = []
+    for tokens in zip(*tokenized):
+        if len(set(tokens)) != 1:
+            break
+        prefix.append(tokens[0])
+
+    if not prefix:
+        return None
+
+    text = " ".join(prefix)
+    if not text.endswith(ORGANIZATION_PREFIX_ENDINGS):
+        return None
+
+    return collapse_repeated_tokens(text)
+
+
+def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
+    if not ranked:
+        return None
+
+    best = ranked[0]
+    near_matches = [
+        item
+        for item in ranked
+        if item.text and best.score - item.score < SEQUENCE_AMBIGUITY_MARGIN
+    ]
+    if len(near_matches) < 2:
+        return None
+
+    prefix = common_token_prefix([item.text for item in near_matches if item.text])
+    if not prefix:
+        return None
+
+    return MatchResult(prefix, best.score, best.query, "sequence_prefix")
+
+
+def find_best_sequence_match(entity_text: str, candidates: list[str]) -> "MatchResult":
+    scores_by_candidate: dict[str, MatchResult] = {}
+
+    for query in make_match_queries(entity_text, ""):
+        for candidate in candidates:
+            score = sequence_match_score(query, candidate)
+            previous = scores_by_candidate.get(candidate)
+            if previous is None or score > previous.score:
+                scores_by_candidate[candidate] = MatchResult(
+                    collapse_repeated_tokens(candidate),
+                    score,
+                    query,
+                    "sequence",
+                )
+
+    ranked = sorted(scores_by_candidate.values(), key=lambda item: item.score, reverse=True)
+    best = ranked[0] if ranked else MatchResult(None, 0.0, entity_text, "sequence")
+    second_score = ranked[1].score if len(ranked) > 1 else 0.0
+
+    if not best.text or best.score < SEQUENCE_MIN_SCORE:
+        return MatchResult(None, 0.0, entity_text, "sequence")
+
+    if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
+        prefix_match = ambiguous_group_match(ranked)
+        if prefix_match:
+            return prefix_match
+        return MatchResult(None, best.score, best.query, "sequence_ambiguous")
+
+    return best
+
+
+def find_fuzzy_match(query: str, candidates: list[str], method: str) -> "MatchResult":
+    matches = fuzz_process.extract(
+        query,
+        candidates,
+        scorer=fuzz.WRatio,
+        processor=normalize_for_match,
+        limit=10,
+    )
+    if not matches:
+        return MatchResult(None, 0.0, query, method)
+
+    ranked = [
+        MatchResult(collapse_repeated_tokens(matched_text), float(score), query, method)
+        for matched_text, score, _ in matches
+    ]
+    best = ranked[0]
+    second_score = ranked[1].score if len(ranked) > 1 else 0.0
+
+    if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
+        prefix_match = ambiguous_group_match(ranked)
+        if prefix_match:
+            prefix_match.method = f"{method}_prefix"
+            return prefix_match
+        return MatchResult(None, best.score, query, f"{method}_ambiguous")
+
+    return best
+
+
 @dataclass
 class MatchResult:
     text: str | None
     score: float
     query: str
+    method: str = "none"
 
 
 def find_best_db_match(entity_text: str, candidates: list[str], label: str) -> MatchResult:
@@ -343,20 +513,28 @@ def find_best_db_match(entity_text: str, candidates: list[str], label: str) -> M
     for query in make_match_queries(entity_text, label):
         exact = candidate_by_key.get(normalize_for_match(query))
         if exact:
-            return MatchResult(exact, 100.0, query)
+            return MatchResult(exact, 100.0, query, "exact")
 
-        match = fuzz_process.extractOne(
-            query,
-            candidates,
-            scorer=fuzz.WRatio,
-            processor=normalize_for_match,
-        )
-        if match is None:
-            continue
+    sequence_match = find_best_sequence_match(entity_text, candidates)
+    if sequence_match.text:
+        return sequence_match
 
-        matched_text, score, _ = match
-        if float(score) > best.score:
-            best = MatchResult(matched_text, float(score), query)
+    for query in get_alias_queries(entity_text, label):
+        exact = candidate_by_key.get(normalize_for_match(query))
+        if exact:
+            return MatchResult(exact, 100.0, query, "alias")
+
+        match = find_fuzzy_match(query, candidates, "alias_fuzzy")
+        if match.text and match.score > best.score:
+            best = match
+
+    if best.text:
+        return best
+
+    for query in make_match_queries(entity_text, label):
+        match = find_fuzzy_match(query, candidates, "fuzzy")
+        if match.text and match.score > best.score:
+            best = match
 
     return best
 
@@ -380,6 +558,8 @@ def should_apply_match(entity: dict[str, Any], match: MatchResult) -> bool:
 
     # Very short spans are easy to over-correct unless they are aliases or strong matches.
     if len(source) <= 2 and match.score < 95:
+        if match.method == "sequence":
+            return True
         aliases = COMMON_ALIASES.get(label, {})
         return source in aliases
 
@@ -407,6 +587,7 @@ def correct_ner_entities(
                 "matched_table": ENTITY_REFERENCE_MAP.get(label, (None, None))[0],
                 "matched_column": ENTITY_REFERENCE_MAP.get(label, (None, None))[1],
                 "similarity": round(match.score, 2) if match.text else None,
+                "match_method": match.method,
                 "correction_applied": corrected_text != entity["text"],
             }
         )
@@ -435,7 +616,7 @@ def preprocess_query(
     query: str,
     model_dir: str | Path = MODEL_DIR,
     max_length: int = 128,
-    fail_open: bool = False,
+    fail_open: bool = True,
 ) -> dict[str, Any]:
     try:
         predictor = get_predictor(model_dir=model_dir, max_length=max_length)
