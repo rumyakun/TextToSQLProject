@@ -304,7 +304,7 @@ def strip_korean_particle(value: str) -> str:
     return stripped
 
 
-def make_match_queries(entity_text: str, label: str) -> list[str]:
+def make_match_queries(entity_text: str) -> list[str]:
     raw = entity_text.strip()
     compact = normalize_for_match(raw)
     particle_stripped = strip_korean_particle(raw)
@@ -376,7 +376,7 @@ def collapse_repeated_tokens(value: str) -> str:
 def exact_containing_matches(query: str, matches: list["MatchResult"]) -> tuple[str, list["MatchResult"]] | None:
     candidates = [
         variant
-        for variant in make_match_queries(query, "")
+        for variant in make_match_queries(query)
         if len(normalize_for_match(variant)) >= 2
     ]
     candidates.sort(key=lambda value: len(normalize_for_match(value)), reverse=True)
@@ -434,7 +434,7 @@ def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
 def find_best_sequence_match(entity_text: str, candidates: list[str]) -> "MatchResult":
     scores_by_candidate: dict[str, MatchResult] = {}
 
-    for query in make_match_queries(entity_text, ""):
+    for query in make_match_queries(entity_text):
         for candidate in candidates:
             score = sequence_match_score(query, candidate)
             previous = scores_by_candidate.get(candidate)
@@ -491,10 +491,13 @@ def find_fuzzy_match(query: str, candidates: list[str], method: str) -> "MatchRe
         return MatchResult(shared_text, containing_matches[0].score, query, f"{method}_exact_shared")
 
     if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
-        prefix_match = ambiguous_group_match(ranked)
-        if prefix_match:
-            prefix_match.method = f"{method}_prefix"
-            return prefix_match
+        ambiguous_match = ambiguous_group_match(ranked)
+        if ambiguous_match:
+            if ambiguous_match.method.startswith("ambiguous_"):
+                ambiguous_match.method = f"{method}_{ambiguous_match.method}"
+            else:
+                ambiguous_match.method = f"{method}_ambiguous"
+            return ambiguous_match
         return MatchResult(None, best.score, query, f"{method}_ambiguous")
 
     return best
@@ -515,7 +518,7 @@ def find_best_db_match(entity_text: str, candidates: list[str], label: str) -> M
     candidate_by_key = {normalize_for_match(candidate): candidate for candidate in candidates}
     best = MatchResult(None, 0.0, entity_text)
 
-    for query in make_match_queries(entity_text, label):
+    for query in make_match_queries(entity_text):
         exact = candidate_by_key.get(normalize_for_match(query))
         if exact:
             return MatchResult(exact, 100.0, query, "exact")
@@ -536,7 +539,7 @@ def find_best_db_match(entity_text: str, candidates: list[str], label: str) -> M
     if best.text:
         return best
 
-    for query in make_match_queries(entity_text, label):
+    for query in make_match_queries(entity_text):
         match = find_fuzzy_match(query, candidates, "fuzzy")
         if match.text and match.score > best.score:
             best = match
