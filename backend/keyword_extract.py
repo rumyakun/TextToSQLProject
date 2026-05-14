@@ -389,11 +389,37 @@ def shared_query_text(query: str, matches: list["MatchResult"]) -> str | None:
     return None
 
 
+def exact_containing_matches(query: str, matches: list["MatchResult"]) -> tuple[str, list["MatchResult"]] | None:
+    candidates = [
+        variant
+        for variant in make_match_queries(query, "")
+        if len(normalize_for_match(variant)) >= 2
+    ]
+    candidates.sort(key=lambda value: len(normalize_for_match(value)), reverse=True)
+
+    for candidate in candidates:
+        candidate_key = normalize_for_match(candidate)
+        containing = [
+            item
+            for item in matches
+            if item.text and candidate_key in normalize_for_match(item.text)
+        ]
+        if len(containing) >= 2:
+            return candidate, containing
+
+    return None
+
+
 def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     if not ranked:
         return None
 
     best = ranked[0]
+    exact_group = exact_containing_matches(best.query, ranked)
+    if exact_group:
+        shared_text, containing_matches = exact_group
+        return MatchResult(shared_text, containing_matches[0].score, best.query, "ambiguous_exact_shared")
+
     near_matches = [
         item
         for item in ranked
@@ -447,6 +473,11 @@ def find_best_sequence_match(entity_text: str, candidates: list[str]) -> "MatchR
     if not best.text or best.score < SEQUENCE_MIN_SCORE:
         return MatchResult(None, 0.0, entity_text, "sequence")
 
+    exact_group = exact_containing_matches(best.query, ranked)
+    if exact_group:
+        shared_text, containing_matches = exact_group
+        return MatchResult(shared_text, containing_matches[0].score, best.query, "sequence_exact_shared")
+
     if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
         prefix_match = ambiguous_group_match(ranked)
         if prefix_match:
@@ -473,6 +504,11 @@ def find_fuzzy_match(query: str, candidates: list[str], method: str) -> "MatchRe
     ]
     best = ranked[0]
     second_score = ranked[1].score if len(ranked) > 1 else 0.0
+
+    exact_group = exact_containing_matches(query, ranked)
+    if exact_group:
+        shared_text, containing_matches = exact_group
+        return MatchResult(shared_text, containing_matches[0].score, query, f"{method}_exact_shared")
 
     if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
         prefix_match = ambiguous_group_match(ranked)
