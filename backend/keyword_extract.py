@@ -54,17 +54,8 @@ LABEL_MIN_SCORES = {
 ## 일종의 사전을 정의하는 것
 COMMON_ALIASES = {
     "DEPARTMENT": {
-        "컴공": ["컴퓨터공학과"],
-        "컴융": ["컴퓨터융합학부"],
-        "인공지능": ["컴퓨터인공지능학부"],
     },
     "CATEGORY": {
-        "전필": ["전공(필수)"],
-        "전선": ["전공(선택)"],
-        "교필": ["교양(필수)"],
-        "교선": ["교양(선택)"],
-        "일선": ["일반(선택)"],
-        "전핵": ["전공(핵심)"],
     },
 }
 
@@ -382,6 +373,22 @@ def collapse_repeated_tokens(value: str) -> str:
     return " ".join(collapsed)
 
 
+def shared_query_text(query: str, matches: list["MatchResult"]) -> str | None:
+    candidates = [
+        variant
+        for variant in make_match_queries(query, "")
+        if len(normalize_for_match(variant)) >= 2
+    ]
+    candidates.sort(key=lambda value: len(normalize_for_match(value)), reverse=True)
+
+    for candidate in candidates:
+        candidate_key = normalize_for_match(candidate)
+        if all(candidate_key in normalize_for_match(item.text or "") for item in matches):
+            return candidate
+
+    return None
+
+
 def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     if not ranked:
         return None
@@ -394,6 +401,10 @@ def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     ]
     if len(near_matches) < 2:
         return None
+
+    shared_text = shared_query_text(best.query, near_matches)
+    if shared_text:
+        return MatchResult(shared_text, best.score, best.query, "ambiguous_shared")
 
     def similarity_to_query(item: MatchResult) -> tuple[float, int]:
         text = item.text or ""
