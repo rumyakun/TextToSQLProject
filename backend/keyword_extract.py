@@ -26,6 +26,9 @@ DEFAULT_MIN_SCORE = float(os.getenv("KEYWORD_CORRECTION_MIN_SCORE", "78"))
 SEQUENCE_MIN_SCORE = float(os.getenv("KEYWORD_SEQUENCE_MIN_SCORE", "72"))
 SEQUENCE_AMBIGUITY_MARGIN = float(os.getenv("KEYWORD_SEQUENCE_AMBIGUITY_MARGIN", "4"))
 SEQUENCE_MAX_QUERY_LENGTH = int(os.getenv("KEYWORD_SEQUENCE_MAX_QUERY_LENGTH", "6"))
+TYPO_MIN_SCORE = float(os.getenv("KEYWORD_TYPO_MIN_SCORE", "84"))
+TYPO_AMBIGUITY_MARGIN = float(os.getenv("KEYWORD_TYPO_AMBIGUITY_MARGIN", "6"))
+TYPO_MIN_QUERY_LENGTH = int(os.getenv("KEYWORD_TYPO_MIN_QUERY_LENGTH", "4"))
 
 ## NER 라벨별로 DB에서 허용 후보 값을 가져올 때 사용하는 (릴레이션, 컬럼) 매핑.
 ## README의 통합 뷰 v_course_info에서 DISTINCT로 읽어, Text-to-SQL이 쓰는 스키마와 동일한 기준으로 교정한다.
@@ -50,13 +53,23 @@ LABEL_MIN_SCORES = {
     "CATEGORY": 74.0,
 }
 
-## fuzzy matching만으로는 교정이 부적절한 경우가 많아, 자주 발생하는 오탈자나 약어에 대해서는 별도의 허용값을 정의하여 교정 정확도를 높임.
+## 오타 보정은 약어/부분일치 매칭과 분리해 보수적으로 적용한다.
+## 자주 쓰는 약어처럼 의도가 명확한 표현은 별도의 허용값으로 정의한다.
 ## 일종의 사전을 정의하는 것
 COMMON_ALIASES = {
     "DEPARTMENT": {
     },
     "CATEGORY": {
     },
+}
+
+TYPO_LABEL_MIN_SCORES = {
+    "COURSE_NAME": 82.0,
+    "DEPARTMENT": 82.0,
+    "CATEGORY": 82.0,
+    "CLASS_MODE": 86.0,
+    "EVAL_TYPE": 86.0,
+    "GRADE_METHOD": 86.0,
 }
 
 ## 한국어 조사 제거를 시도하여 매칭 정확도를 높임. (예: "컴퓨터공학과에서" -> "컴퓨터공학과")
@@ -402,33 +415,9 @@ def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     exact_group = exact_containing_matches(best.query, ranked)
     if exact_group:
         shared_text, containing_matches = exact_group
-        return MatchResult(shared_text, containing_matches[0].score, best.query, "ambiguous_exact_shared")
+        return MatchResult(shared_text, containing_matches[0].score, best.query, "sequence_exact_shared")
 
-    near_matches = [
-        item
-        for item in ranked
-        if item.text and best.score - item.score < SEQUENCE_AMBIGUITY_MARGIN
-    ]
-    if len(near_matches) < 2:
-        return None
-
-    def similarity_to_query(item: MatchResult) -> tuple[float, int]:
-        text = item.text or ""
-        return (
-            float(fuzz.WRatio(best.query, text, processor=normalize_for_match)),
-            -len(normalize_for_match(text)),
-        )
-
-    selected = max(near_matches, key=similarity_to_query)
-    if not selected.text:
-        return None
-
-    return MatchResult(
-        collapse_repeated_tokens(selected.text),
-        selected.score,
-        best.query,
-        "ambiguous_best",
-    )
+    return None
 
 
 def find_best_sequence_match(entity_text: str, candidates: list[str]) -> "MatchResult":
@@ -467,38 +456,75 @@ def find_best_sequence_match(entity_text: str, candidates: list[str]) -> "MatchR
     return best
 
 
-def find_fuzzy_match(query: str, candidates: list[str], method: str) -> "MatchResult":
+def is_typo_candidate_shape(query: str, candidate: str) -> bool:
+    query_key = normalize_for_match(strip_korean_particle(query))
+    candidate_key = normalize_for_match(candidate)
+    if len(query_key) < TYPO_MIN_QUERY_LENGTH or len(candidate_key) < TYPO_MIN_QUERY_LENGTH:
+        return False
+
+    # Very different lengths usually mean abbreviation, broad substring search,
+    # or a different concept rather than a typo.
+    max_length_gap = max(2, int(len(query_key) * 0.35))
+    if abs(len(candidate_key) - len(query_key)) > max_length_gap:
+        return False
+
+    return True
+
+
+def find_typo_match(query: str, candidates: list[str], label: str) -> "MatchResult":
+    eligible_candidates = [
+        candidate
+        for candidate in candidates
+        if is_typo_candidate_shape(query, candidate)
+    ]
+    if not eligible_candidates:
+        return MatchResult(None, 0.0, query, "typo_ineligible")
+
     matches = fuzz_process.extract(
         query,
-        candidates,
-        scorer=fuzz.WRatio,
+        eligible_candidates,
+        scorer=fuzz.ratio,
         processor=normalize_for_match,
-        limit=10,
+        limit=5,
     )
     if not matches:
-        return MatchResult(None, 0.0, query, method)
+        return MatchResult(None, 0.0, query, "typo_no_match")
 
     ranked = [
-        MatchResult(collapse_repeated_tokens(matched_text), float(score), query, method)
+        MatchResult(collapse_repeated_tokens(matched_text), float(score), query, "typo")
         for matched_text, score, _ in matches
     ]
     best = ranked[0]
-    second_score = ranked[1].score if len(ranked) > 1 else 0.0
+    min_score = TYPO_LABEL_MIN_SCORES.get(label, TYPO_MIN_SCORE)
+    if best.score < min_score:
+        return MatchResult(None, best.score, query, "typo_low_score")
 
-    exact_group = exact_containing_matches(query, ranked)
-    if exact_group:
-        shared_text, containing_matches = exact_group
-        return MatchResult(shared_text, containing_matches[0].score, query, f"{method}_exact_shared")
+    near_matches = [
+        item
+        for item in ranked[1:]
+        if item.text and best.score - item.score < TYPO_AMBIGUITY_MARGIN
+    ]
+    if near_matches:
+        same_target_matches = [
+            item
+            for item in near_matches
+            if normalize_for_match(item.text or "") == normalize_for_match(best.text or "")
+        ]
+        if len(same_target_matches) != len(near_matches):
+            return MatchResult(None, best.score, query, "typo_ambiguous")
 
-    if best.score - second_score < SEQUENCE_AMBIGUITY_MARGIN:
-        ambiguous_match = ambiguous_group_match(ranked)
-        if ambiguous_match:
-            if ambiguous_match.method.startswith("ambiguous_"):
-                ambiguous_match.method = f"{method}_{ambiguous_match.method}"
-            else:
-                ambiguous_match.method = f"{method}_ambiguous"
-            return ambiguous_match
-        return MatchResult(None, best.score, query, f"{method}_ambiguous")
+    return best
+
+
+def find_best_typo_match(entity_text: str, candidates: list[str], label: str) -> "MatchResult":
+    best = MatchResult(None, 0.0, entity_text, "typo_no_match")
+
+    for query in make_match_queries(entity_text):
+        match = find_typo_match(query, candidates, label)
+        if match.text:
+            return match
+        if match.score > best.score:
+            best = match
 
     return best
 
@@ -516,7 +542,6 @@ def find_best_db_match(entity_text: str, candidates: list[str], label: str) -> M
         return MatchResult(None, 0.0, entity_text)
 
     candidate_by_key = {normalize_for_match(candidate): candidate for candidate in candidates}
-    best = MatchResult(None, 0.0, entity_text)
 
     for query in make_match_queries(entity_text):
         exact = candidate_by_key.get(normalize_for_match(query))
@@ -532,19 +557,13 @@ def find_best_db_match(entity_text: str, candidates: list[str], label: str) -> M
         if exact:
             return MatchResult(exact, 100.0, query, "alias")
 
-        match = find_fuzzy_match(query, candidates, "alias_fuzzy")
-        if match.text and match.score > best.score:
-            best = match
+    typo_match = find_best_typo_match(entity_text, candidates, label)
+    if typo_match.text:
+        return typo_match
 
-    if best.text:
-        return best
-
-    for query in make_match_queries(entity_text):
-        match = find_fuzzy_match(query, candidates, "fuzzy")
-        if match.text and match.score > best.score:
-            best = match
-
-    return best
+    if sequence_match.score >= typo_match.score:
+        return sequence_match
+    return typo_match
 
 
 def should_apply_match(entity: dict[str, Any], match: MatchResult) -> bool:
@@ -594,7 +613,7 @@ def correct_ner_entities(
                 "corrected_text": corrected_text,
                 "matched_table": ENTITY_REFERENCE_MAP.get(label, (None, None))[0],
                 "matched_column": ENTITY_REFERENCE_MAP.get(label, (None, None))[1],
-                "similarity": round(match.score, 2) if match.text else None,
+                "similarity": round(match.score, 2) if match.score else None,
                 "match_method": match.method,
                 "correction_applied": corrected_text != entity["text"],
             }
