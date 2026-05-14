@@ -26,7 +26,6 @@ DEFAULT_MIN_SCORE = float(os.getenv("KEYWORD_CORRECTION_MIN_SCORE", "78"))
 SEQUENCE_MIN_SCORE = float(os.getenv("KEYWORD_SEQUENCE_MIN_SCORE", "72"))
 SEQUENCE_AMBIGUITY_MARGIN = float(os.getenv("KEYWORD_SEQUENCE_AMBIGUITY_MARGIN", "4"))
 SEQUENCE_MAX_QUERY_LENGTH = int(os.getenv("KEYWORD_SEQUENCE_MAX_QUERY_LENGTH", "6"))
-ORGANIZATION_PREFIX_ENDINGS = ("대학", "학부", "학과", "전공과정", "과정")
 
 ## NER 라벨별로 DB에서 허용 후보 값을 가져올 때 사용하는 (릴레이션, 컬럼) 매핑.
 ## README의 통합 뷰 v_course_info에서 DISTINCT로 읽어, Text-to-SQL이 쓰는 스키마와 동일한 기준으로 교정한다.
@@ -374,13 +373,6 @@ def sequence_match_score(query: str, candidate: str) -> float:
     return max(0.0, min(100.0, float(score)))
 
 
-def trim_leading_university_name(value: str) -> str:
-    tokens = value.split()
-    if tokens and tokens[0] == "충남대학교":
-        return " ".join(tokens[1:])
-    return value
-
-
 def collapse_repeated_tokens(value: str) -> str:
     tokens = value.split()
     collapsed: list[str] = []
@@ -388,35 +380,6 @@ def collapse_repeated_tokens(value: str) -> str:
         if not collapsed or collapsed[-1] != token:
             collapsed.append(token)
     return " ".join(collapsed)
-
-
-def common_token_prefix(values: list[str]) -> str | None:
-    if not values:
-        return None
-
-    cleaned = [
-        collapse_repeated_tokens(trim_leading_university_name(value))
-        for value in values
-        if value.strip()
-    ]
-    tokenized = [value.split() for value in cleaned if value.strip()]
-    if not tokenized:
-        return None
-
-    prefix: list[str] = []
-    for tokens in zip(*tokenized):
-        if len(set(tokens)) != 1:
-            break
-        prefix.append(tokens[0])
-
-    if not prefix:
-        return None
-
-    text = " ".join(prefix)
-    if not text.endswith(ORGANIZATION_PREFIX_ENDINGS):
-        return None
-
-    return collapse_repeated_tokens(text)
 
 
 def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
@@ -432,11 +395,23 @@ def ambiguous_group_match(ranked: list["MatchResult"]) -> "MatchResult | None":
     if len(near_matches) < 2:
         return None
 
-    prefix = common_token_prefix([item.text for item in near_matches if item.text])
-    if not prefix:
+    def similarity_to_query(item: MatchResult) -> tuple[float, int]:
+        text = item.text or ""
+        return (
+            float(fuzz.WRatio(best.query, text, processor=normalize_for_match)),
+            -len(normalize_for_match(text)),
+        )
+
+    selected = max(near_matches, key=similarity_to_query)
+    if not selected.text:
         return None
 
-    return MatchResult(prefix, best.score, best.query, "sequence_prefix")
+    return MatchResult(
+        collapse_repeated_tokens(selected.text),
+        selected.score,
+        best.query,
+        "ambiguous_best",
+    )
 
 
 def find_best_sequence_match(entity_text: str, candidates: list[str]) -> "MatchResult":
