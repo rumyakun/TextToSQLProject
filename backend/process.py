@@ -57,6 +57,12 @@ def process(query):
             "db_ms": 0,
             "total_ms": int((time.perf_counter() - started_total) * 1000),
         }
+        log_query(
+            normalized_query,
+            (cached.get("sql") or "") if isinstance(cached, dict) else "",
+            True,
+            "cache_hit",
+        )
         return _with_query_context(cached, query, normalized_query, preprocessing)
 
     sql = None
@@ -67,6 +73,7 @@ def process(query):
         timings["llm_ms"] = int((time.perf_counter() - t_llm) * 1000)
 
         if not sql or sql == "UNKNOWN":
+            log_query(normalized_query, sql or "", False, "ambiguous_or_no_sql")
             return {"error": "질문이 모호합니다."}
 
         sql = enforce_limit(sql)
@@ -157,7 +164,7 @@ def process(query):
                 raise
 
             timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
-            return _with_query_context(
+            res = _with_query_context(
                 {
                     "sql": fixed,
                     "data": result,
@@ -168,6 +175,9 @@ def process(query):
                 normalized_query,
                 preprocessing,
             )
+            set_cache(normalized_query, res)
+            log_query(normalized_query, fixed, True, "after_sql_fix")
+            return res
 
         except Exception as e2:
             log_query(normalized_query, sql, False)

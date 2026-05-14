@@ -18,6 +18,8 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer
 
 
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv()
+load_dotenv(BASE_DIR / ".env", override=False)
 MODEL_DIR = BASE_DIR / "course_custom_ner_model" / "models" / "course-custom-ner"
 REFERENCE_LIMIT = int(os.getenv("KEYWORD_REFERENCE_LIMIT", "20000"))
 DEFAULT_MIN_SCORE = float(os.getenv("KEYWORD_CORRECTION_MIN_SCORE", "78"))
@@ -26,17 +28,18 @@ SEQUENCE_AMBIGUITY_MARGIN = float(os.getenv("KEYWORD_SEQUENCE_AMBIGUITY_MARGIN",
 SEQUENCE_MAX_QUERY_LENGTH = int(os.getenv("KEYWORD_SEQUENCE_MAX_QUERY_LENGTH", "6"))
 ORGANIZATION_PREFIX_ENDINGS = ("대학", "학부", "학과", "전공과정", "과정")
 
-## NER label이 DB의 어느 테이블, 컬럼과 매핑되는지 정의.
-## 교정된 값이 DB에 존재하는지 확인하기 위함.
-## 예) "COURSE_NAME" 엔티티는 "subject" 테이블의 "subject_name" 컬럼과 매핑되어, 교정된 과목명이 실제로 존재하는지 확인할 때 참조됨.
+## NER 라벨별로 DB에서 허용 후보 값을 가져올 때 사용하는 (릴레이션, 컬럼) 매핑.
+## README의 통합 뷰 v_course_info에서 DISTINCT로 읽어, Text-to-SQL이 쓰는 스키마와 동일한 기준으로 교정한다.
+## 뷰 이름만 바꾸려면 환경 변수 KEYWORD_REFERENCE_VIEW (기본 v_course_info).
+REFERENCE_VIEW_NAME = (os.getenv("KEYWORD_REFERENCE_VIEW", "v_course_info") or "v_course_info").strip()
+
 ENTITY_REFERENCE_MAP = {
-    "CATEGORY": ("subject", "category"),
-    "COURSE_NAME": ("subject", "subject_name"),
-    "DEPARTMENT": ("department", "dept_name"),
-    "CLASS_MODE": ("course_offerings", "class_mode"),
-    "EVAL_TYPE": ("course_offerings", "eval_type"),
-    "GRADE_METHOD": ("course_offerings", "grading_method"),
-    "PROFESSOR": ("course_offerings", "professor"),
+    "CATEGORY": (REFERENCE_VIEW_NAME, "category"),
+    "COURSE_NAME": (REFERENCE_VIEW_NAME, "subject_name"),
+    "DEPARTMENT": (REFERENCE_VIEW_NAME, "dept_name"),
+    "CLASS_MODE": (REFERENCE_VIEW_NAME, "class_mode"),
+    "EVAL_TYPE": (REFERENCE_VIEW_NAME, "eval_type"),
+    "GRADE_METHOD": (REFERENCE_VIEW_NAME, "grading_method"),
 }
 
 ## 최소 유사도 기준. 라벨별로 다르게 적용하여 과도한 교정을 방지.
@@ -46,7 +49,6 @@ LABEL_MIN_SCORES = {
     "COURSE_NAME": 70.0,
     "DEPARTMENT": 74.0,
     "CATEGORY": 74.0,
-    "PROFESSOR": 82.0,
 }
 
 ## fuzzy matching만으로는 교정이 부적절한 경우가 많아, 자주 발생하는 오탈자나 약어에 대해서는 별도의 허용값을 정의하여 교정 정확도를 높임.
@@ -63,6 +65,7 @@ COMMON_ALIASES = {
         "교필": ["교양(필수)"],
         "교선": ["교양(선택)"],
         "일선": ["일반(선택)"],
+        "전핵": ["전공(핵심)"],
     },
 }
 
