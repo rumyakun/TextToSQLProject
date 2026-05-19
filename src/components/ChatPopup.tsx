@@ -328,6 +328,7 @@ export default function ChatPopup({
   const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!open) {
@@ -365,9 +366,31 @@ export default function ChatPopup({
     [hoveredCourse, selectedCourses],
   )
 
+  function cancelQuery() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
+    setLastError('')
+    setLastWarning('')
+    setDbCourses(null)
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId('sys'),
+        role: 'system',
+        text: '질의를 취소하셨습니다. 다시 질문해 주세요!',
+      },
+    ])
+  }
+
   async function send() {
+    if (loading) {
+      cancelQuery()
+      return
+    }
+
     const text = input.trim()
-    if (!text || loading) return
+    if (!text) return
     setInput('')
     setLastError('')
     setLastWarning('')
@@ -379,12 +402,15 @@ export default function ChatPopup({
     ])
 
     setLoading(true)
+    const controller = new AbortController()
+    abortRef.current = controller
 
     try {
       const res = await fetch('/api/v1/chat/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: text }),
+        signal: controller.signal,
       })
       const payload = (await res.json()) as QueryApiResponse
 
@@ -426,7 +452,10 @@ export default function ChatPopup({
           text: summary,
         },
       ])
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
       const errorText = '백엔드 연결에 실패했습니다. 서버 실행 상태를 확인해주세요.'
       setLastError(errorText)
       setDbCourses(null)
@@ -439,6 +468,7 @@ export default function ChatPopup({
         },
       ])
     } finally {
+      abortRef.current = null
       setLoading(false)
     }
   }
@@ -531,10 +561,14 @@ export default function ChatPopup({
               <button
                 type="button"
                 onClick={send}
-                disabled={loading}
-                className="h-10 shrink-0 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 active:bg-blue-700"
+                className={cn(
+                  'h-10 shrink-0 rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition',
+                  loading
+                    ? 'bg-rose-600 hover:bg-rose-700 active:bg-rose-700'
+                    : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-700',
+                )}
               >
-                {loading ? '...' : 'Send'}
+                {loading ? 'Cancel' : 'Send'}
               </button>
             </div>
             {lastWarning && (
