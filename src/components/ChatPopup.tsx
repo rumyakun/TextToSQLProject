@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Course } from '../types/course'
+import type { Course, CourseDetail } from '../types/course'
 import { cn } from '../utils/cn'
 import Timetable from './Timetable'
 
@@ -17,6 +17,12 @@ type QueryApiResponse = {
 }
 
 type QueryRow = Record<string, unknown>
+type QueryScheduleSlot = {
+  day?: unknown
+  start?: unknown
+  end?: unknown
+  room?: unknown
+}
 
 function makeId(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
@@ -42,9 +48,55 @@ function readNumber(row: QueryRow, keys: string[]) {
     if (typeof value === 'string' && value.trim()) {
       const parsed = Number(value)
       if (Number.isFinite(parsed)) return parsed
+      const match = value.match(/\d+/)
+      if (match) return Number(match[0])
     }
   }
   return undefined
+}
+
+function readDetails(row: QueryRow): CourseDetail[] {
+  const labels: Array<[string, string]> = [
+    ['course_year', '학년'],
+    ['subject_code', '과목코드'],
+    ['section', '분반'],
+    ['subject_name', '과목명'],
+    ['category', '이수구분'],
+    ['credit_hours', '학점'],
+    ['target_year', '대상학년'],
+    ['professor', '교수'],
+    ['capacity', '정원'],
+    ['enrolled', '수강인원'],
+    ['grading_method', '성적평가'],
+    ['eval_type', '평가방식'],
+    ['class_mode', '수업방식'],
+    ['dept_name', '학과'],
+    ['day_of_week', '요일'],
+    ['start_time', '시작'],
+    ['end_time', '종료'],
+    ['classroom', '강의실'],
+  ]
+
+  return labels.flatMap(([key, label]) => {
+    const value = row[key]
+    if (value === undefined || value === null || value === '') return []
+    return [{ label, value: String(value) }]
+  })
+}
+
+function detailTitle(course: Course) {
+  const details = course.details ?? []
+  if (details.length === 0) {
+    return [
+      course.name,
+      `교수: ${course.professor}`,
+      `시간: ${course.timeText}`,
+      course.locationText ? `강의실: ${course.locationText}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+  return details.map((detail) => `${detail.label}: ${detail.value}`).join('\n')
 }
 
 function normalizeDay(value: string): Course['slots'][number]['day'] | null {
@@ -54,14 +106,17 @@ function normalizeDay(value: string): Course['slots'][number]['day'] | null {
   if (['wed', 'wednesday', '수', '수요일'].includes(normalized)) return 'Wed'
   if (['thu', 'thur', 'thurs', 'thursday', '목', '목요일'].includes(normalized)) return 'Thu'
   if (['fri', 'friday', '금', '금요일'].includes(normalized)) return 'Fri'
+  if (['sat', 'saturday', '토', '토요일'].includes(normalized)) return 'Sat'
   return null
 }
 
-function parseHour(value: string) {
-  const match = value.match(/\d{1,2}/)
+function parseClockHour(value: string) {
+  const match = value.match(/(\d{1,2})(?::([0-5]\d))?/)
   if (!match) return null
-  const hour = Number(match[0])
-  return Number.isFinite(hour) ? hour : null
+  const hour = Number(match[1])
+  const minute = Number(match[2] ?? '0')
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return hour + minute / 60
 }
 
 function parseSlots(timeText: string): Course['slots'] {
@@ -70,18 +125,53 @@ function parseSlots(timeText: string): Course['slots'] {
 
   for (const part of parts) {
     const match = part.match(
-      /(mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|월요일?|화요일?|수요일?|목요일?|금요일?)\s*[\s(]*([0-2]?\d)(?::\d{2})?\s*[-~]\s*([0-2]?\d)(?::\d{2})?/i,
+      /(mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|월요일?|화요일?|수요일?|목요일?|금요일?|토요일?)\s*[\s(]*([0-2]?\d(?::[0-5]\d)?)\s*[-~]\s*([0-2]?\d(?::[0-5]\d)?)/i,
     )
     if (!match) continue
 
     const day = normalizeDay(match[1])
-    const startHour = parseHour(match[2])
-    const endHour = parseHour(match[3])
+    const startHour = parseClockHour(match[2])
+    const endHour = parseClockHour(match[3])
     if (!day || startHour === null || endHour === null || endHour <= startHour) continue
     slots.push({ day, startHour, endHour })
   }
 
   return slots
+}
+
+function readScheduleSlots(row: QueryRow): Course['slots'] {
+  const rawSchedule = row.schedule
+  if (!Array.isArray(rawSchedule)) return []
+
+  return rawSchedule
+    .map((slot): Course['slots'][number] | null => {
+      if (!slot || typeof slot !== 'object' || Array.isArray(slot)) return null
+      const scheduleSlot = slot as QueryScheduleSlot
+      const dayText = readString(scheduleSlot as QueryRow, ['day'])
+      const startText = readString(scheduleSlot as QueryRow, ['start'])
+      const endText = readString(scheduleSlot as QueryRow, ['end'])
+      const day = normalizeDay(dayText)
+      const startHour = parseClockHour(startText)
+      const endHour = parseClockHour(endText)
+      if (!day || startHour === null || endHour === null || endHour <= startHour) {
+        return null
+      }
+      return { day, startHour, endHour }
+    })
+    .filter((slot): slot is Course['slots'][number] => slot !== null)
+}
+
+function readFieldSlot(row: QueryRow): Course['slots'] {
+  const dayText = readString(row, ['day_of_week', 'day'])
+  const startText = readString(row, ['start_time', 'start'])
+  const endText = readString(row, ['end_time', 'end'])
+  const day = normalizeDay(dayText)
+  const startHour = parseClockHour(startText)
+  const endHour = parseClockHour(endText)
+  if (!day || startHour === null || endHour === null || endHour <= startHour) {
+    return []
+  }
+  return [{ day, startHour, endHour }]
 }
 
 function rowToCourse(row: QueryRow, index: number): Course {
@@ -105,8 +195,14 @@ function rowToCourse(row: QueryRow, index: number): Course {
     readString(row, ['professor', 'instructor', 'teacher', '교수']) || '-'
   const credits = readNumber(row, ['credit_hours', 'credits', 'credit', '학점']) ?? 0
   const timeText =
-    readString(row, ['lecture_time', 'time_text', 'schedule', 'time', '시간']) ||
+    readString(row, ['lecture_time', 'time_text', 'time', '시간']) ||
     'Time TBA'
+  const slots = [
+    ...readScheduleSlots(row),
+    ...readFieldSlot(row),
+    ...parseSlots(timeText),
+  ]
+  const locationText = readString(row, ['classroom', 'room', 'locationText', 'location'])
   const capacity = readNumber(row, ['capacity', '정원'])
   const enrolled = readNumber(row, ['enrolled', 'registered', '수강인원'])
   const status =
@@ -117,33 +213,83 @@ function rowToCourse(row: QueryRow, index: number): Course {
   return {
     id,
     name,
+    departmentName: readString(row, ['dept_name', 'departmentName', 'department_name']),
     professor,
     credits,
     status,
+    capacity,
+    enrolled,
     timeText,
-    slots: parseSlots(timeText),
+    locationText,
+    slots,
+    details: readDetails(row),
   }
 }
 
+function slotKey(slot: Course['slots'][number]) {
+  return `${slot.day}-${slot.startHour}-${slot.endHour}`
+}
+
+function mergeCourses(existing: Course, next: Course): Course {
+  const seenSlots = new Set(existing.slots.map(slotKey))
+  const mergedSlots = [...existing.slots]
+  for (const slot of next.slots) {
+    const key = slotKey(slot)
+    if (seenSlots.has(key)) continue
+    seenSlots.add(key)
+    mergedSlots.push(slot)
+  }
+
+  const timeParts = existing.timeText
+    .split(/\s*,\s*/)
+    .filter(Boolean)
+  for (const part of next.timeText.split(/\s*,\s*/).filter(Boolean)) {
+    if (part === 'Time TBA' || timeParts.includes(part)) continue
+    timeParts.push(part)
+  }
+
+  return {
+    ...existing,
+    timeText: timeParts.length > 0 ? timeParts.join(', ') : existing.timeText,
+    locationText: mergeTextList(existing.locationText, next.locationText),
+    slots: mergedSlots,
+    details: [...(existing.details ?? []), ...(next.details ?? [])],
+  }
+}
+
+function mergeTextList(existing?: string, next?: string) {
+  const parts = (existing ?? '').split(/\s*,\s*/).filter(Boolean)
+  for (const part of (next ?? '').split(/\s*,\s*/).filter(Boolean)) {
+    if (!parts.includes(part)) parts.push(part)
+  }
+  return parts.join(', ') || undefined
+}
+
 function rowsToCourses(rows: unknown[]) {
-  return rows.filter(isQueryRow).map(rowToCourse)
+  const courses = new Map<string, Course>()
+  rows.filter(isQueryRow).forEach((row, index) => {
+    const course = rowToCourse(row, index)
+    const existing = courses.get(course.id)
+    courses.set(course.id, existing ? mergeCourses(existing, course) : course)
+  })
+  return [...courses.values()]
 }
 
 export default function ChatPopup({
   open,
   onClose,
-  allCourses,
   selectedCourses,
   selectedIds,
   onAddCourse,
+  onRemoveCourse,
   onOpenExpandedTimetable,
 }: {
   open: boolean
   onClose: () => void
-  allCourses: Course[]
   selectedCourses: Course[]
   selectedIds: Set<string>
   onAddCourse: (course: Course) => void
+  onRemoveCourse: (courseId: string) => void
   onOpenExpandedTimetable: () => void
 }) {
   const [mounted, setMounted] = useState(false)
@@ -192,17 +338,9 @@ export default function ChatPopup({
   }, [mounted, messages.length])
 
   const results = useMemo(() => {
-    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.text ?? ''
-    const q = lastUser.trim().toLowerCase()
-    const sourceCourses = dbCourses ?? allCourses
-    if (dbCourses) return sourceCourses.slice(0, 6)
-    if (!q) return sourceCourses.slice(0, 5)
-    const hits = sourceCourses.filter((c) => {
-      const hay = `${c.id} ${c.name} ${c.professor} ${c.timeText}`.toLowerCase()
-      return hay.includes(q) || (q.includes('db') && hay.includes('database'))
-    })
-    return (hits.length ? hits : sourceCourses.slice(0, 5)).slice(0, 6)
-  }, [allCourses, dbCourses, messages])
+    if (dbCourses === null) return []
+    return dbCourses
+  }, [dbCourses])
 
   async function send() {
     const text = input.trim()
@@ -220,7 +358,7 @@ export default function ChatPopup({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/query', {
+      const res = await fetch('/api/v1/chat/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: text }),
@@ -298,14 +436,14 @@ export default function ChatPopup({
 
       <div
         className={cn(
-          'relative w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition duration-200',
+          'relative flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition duration-200',
           visible ? 'opacity-100 scale-100' : 'opacity-0 scale-95',
         )}
         role="dialog"
         aria-modal="true"
         aria-label="AI Course Assistant"
       >
-        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-slate-900">
               AI Course Assistant
@@ -324,7 +462,7 @@ export default function ChatPopup({
           </button>
         </div>
 
-        <div className="flex max-h-[76vh] flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="px-4 pt-4">
             <div
               ref={scrollRef}
@@ -398,49 +536,54 @@ export default function ChatPopup({
             )}
           </div>
 
-          <div className="border-t border-slate-200 px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold text-slate-700">
-                Course results
+          {dbCourses !== null && (
+            <div className="border-t border-slate-200 px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-slate-700">
+                  Course results
+                </div>
+                <div className="text-xs text-slate-500">
+                  {results.length} items
+                </div>
               </div>
-              <div className="text-xs text-slate-500">
-                {results.length} items
-              </div>
-            </div>
-            <div className="mt-2 space-y-2">
-              {results.map((c) => {
-                const already = selectedIds.has(c.id)
-                return (
-                  <div
-                    key={c.id}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900">
-                        {c.name}
-                      </div>
-                      <div className="truncate text-xs text-slate-500">
-                        {c.timeText}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={already}
-                      onClick={() => onAddCourse(c)}
-                      className={cn(
-                        'h-9 shrink-0 rounded-lg px-3 text-xs font-semibold transition',
-                        already
-                          ? 'cursor-not-allowed bg-slate-100 text-slate-400'
-                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
-                      )}
+              <div className="mt-2 min-h-36 space-y-2 pr-1">
+                {results.map((c) => {
+                  const already = selectedIds.has(c.id)
+                  return (
+                    <div
+                      key={c.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
+                      title={detailTitle(c)}
                     >
-                      {already ? 'Added' : 'Add'}
-                    </button>
-                  </div>
-                )
-              })}
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">
+                          {c.name}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">
+                          {c.professor} · {c.timeText}
+                          {c.locationText ? ` · Location: ${c.locationText}` : ''}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          already ? onRemoveCourse(c.id) : onAddCourse(c)
+                        }
+                        className={cn(
+                          'h-9 shrink-0 rounded-lg px-3 text-xs font-semibold transition',
+                          already
+                            ? 'bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
+                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+                        )}
+                      >
+                        {already ? 'Remove' : 'Add'}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="border-t border-slate-200 bg-white px-4 py-4">
             <div className="mb-2 flex items-center justify-between">

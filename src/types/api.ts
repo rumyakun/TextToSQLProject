@@ -65,6 +65,11 @@ export type CourseScheduleSlotApi = {
   room?: string
 }
 
+export type CourseDetailApi = {
+  label: string
+  value: string
+}
+
 export type CourseItemApi = {
   courseId: string
   name: string
@@ -76,8 +81,10 @@ export type CourseItemApi = {
   enrolled?: number
   schedule: CourseScheduleSlotApi[]
   lectureTime?: string
+  locationText?: string
   section?: string
   tags?: string[]
+  details?: CourseDetailApi[]
 }
 
 export type CoursesQuery = {

@@ -2,7 +2,7 @@ import type { ElementType } from 'react'
 import type { Course, Weekday } from '../types/course'
 import { cn } from '../utils/cn'
 
-const days: Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+const days: Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function dayLabel(d: Weekday) {
   switch (d) {
@@ -16,6 +16,8 @@ function dayLabel(d: Weekday) {
       return 'Thu'
     case 'Fri':
       return 'Fri'
+    case 'Sat':
+      return 'Sat'
   }
 }
 
@@ -34,6 +36,12 @@ function courseColor(id: string) {
   return palette[hash % palette.length]
 }
 
+function formatHour(value: number) {
+  const hour = Math.floor(value)
+  const minute = Math.round((value - hour) * 60)
+  return `${hour}:${String(minute).padStart(2, '0')}`
+}
+
 export default function Timetable({
   courses,
   variant,
@@ -44,7 +52,7 @@ export default function Timetable({
   onClick?: () => void
 }) {
   const startHour = 9
-  const endHour = 18
+  const endHour = 22
   const hours = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i)
 
   const hourHeight = variant === 'mini' ? 16 : 44
@@ -106,7 +114,7 @@ export default function Timetable({
               ))}
             </div>
 
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-6 gap-2">
               {days.map((d) => (
                 <div key={d} className="min-w-0">
                   <div className="mb-1.5 text-center font-semibold text-slate-600">
@@ -138,14 +146,14 @@ export default function Timetable({
                                 courseColor(c.id),
                               )}
                               style={{ top, height }}
-                              title={`${c.name} (${s.startHour}:00-${s.endHour}:00)`}
+                              title={`${c.name} (${formatHour(s.startHour)}-${formatHour(s.endHour)})`}
                             >
                               <div className={cn('truncate font-semibold', variant === 'mini' ? 'text-[10px]' : 'text-xs')}>
                                 {c.name}
                               </div>
                               {variant === 'full' ? (
                                 <div className="mt-0.5 truncate text-[11px] opacity-90">
-                                  {s.startHour}:00–{s.endHour}:00
+                                  {formatHour(s.startHour)}–{formatHour(s.endHour)}
                                 </div>
                               ) : null}
                             </div>

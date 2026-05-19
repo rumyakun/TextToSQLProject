@@ -3,7 +3,6 @@ import ChatPopup from '../components/ChatPopup'
 import CourseTable from '../components/CourseTable'
 import ExpandedTimetableModal from '../components/ExpandedTimetableModal'
 import Timetable from '../components/Timetable'
-import { mockCourses } from '../mock/courses'
 import { coursesApi } from '../services/api'
 import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
@@ -45,7 +44,7 @@ export default function MainPage({
   onLoginClick,
   onLogout,
 }: MainPageProps) {
-  const [allCourses, setAllCourses] = useState<Course[]>(mockCourses)
+  const [allCourses, setAllCourses] = useState<Course[]>([])
   const [popupOpen, setPopupOpen] = useState(false)
   const [expandedOpen, setExpandedOpen] = useState(false)
   const [selectedCourses, setSelectedCourses] = useState<Course[]>([])
@@ -67,7 +66,7 @@ export default function MainPage({
         }
       } catch {
         if (!disposed) {
-          setAllCourses(mockCourses)
+          setAllCourses([])
         }
       }
     }
@@ -89,6 +88,10 @@ export default function MainPage({
       if (prev.some((c) => c.id === course.id)) return prev
       return [...prev, course]
     })
+  }
+
+  function removeCourse(courseId: string) {
+    setSelectedCourses((prev) => prev.filter((c) => c.id !== courseId))
   }
 
   return (
@@ -168,7 +171,12 @@ export default function MainPage({
 
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[1.45fr_0.95fr]">
         <section className="min-w-0">
-          <CourseTable courses={allCourses} selectedIds={selectedIds} />
+          <CourseTable
+            courses={allCourses}
+            selectedIds={selectedIds}
+            onAddCourse={addCourse}
+            onRemoveCourse={removeCourse}
+          />
         </section>
 
         <aside className="space-y-5">
@@ -205,9 +213,24 @@ export default function MainPage({
                       <div className="truncate text-xs text-slate-500">
                         {c.timeText}
                       </div>
+                      {c.locationText ? (
+                        <div className="truncate text-xs text-slate-500">
+                          Location: {c.locationText}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="shrink-0 text-xs font-semibold text-slate-600">
-                      {c.credits}cr
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div className="text-xs font-semibold text-slate-600">
+                        {c.credits > 0 ? `${c.credits}cr` : 'Credits TBA'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeCourse(c.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-700"
+                        aria-label={`Remove ${c.name}`}
+                      >
+                        <span className="text-base leading-none">×</span>
+                      </button>
                     </div>
                   </div>
                 ))
@@ -238,10 +261,10 @@ export default function MainPage({
       <ChatPopup
         open={popupOpen}
         onClose={() => setPopupOpen(false)}
-        allCourses={allCourses}
         selectedCourses={selectedCourses}
         selectedIds={selectedIds}
         onAddCourse={addCourse}
+        onRemoveCourse={removeCourse}
         onOpenExpandedTimetable={() => setExpandedOpen(true)}
       />
 

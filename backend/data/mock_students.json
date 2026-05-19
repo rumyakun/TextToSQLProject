@@ -1,0 +1,27 @@
+{
+  "students": [
+    {
+      "id": "cnu-202601234",
+      "studentNo": "202601234",
+      "name": "26학번 학생",
+      "departmentCode": "CAI",
+      "departmentName": "컴퓨터인공지능학부",
+      "grade": 1,
+      "majorType": "MAIN",
+      "admissionYear": 2026,
+      "requirementVersion": "2026-CAI",
+      "currentYear": 2026,
+      "currentSemester": "1",
+      "firstCourseRegistration": true,
+      "completedCredits": 0,
+      "completedCourses": [],
+      "plannedCourses": []
+    }
+  ],
+  "credentials": [
+    {
+      "studentNo": "202601234",
+      "passwordHash": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+    }
+  ]
+}
