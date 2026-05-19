@@ -6,7 +6,9 @@ import Timetable from '../components/Timetable'
 import { coursesApi } from '../services/api'
 import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
+import { courseColor } from '../utils/courseColors'
 import { apiCourseToCourse } from '../utils/courseMapper'
+import { getConflictingCourseIds } from '../utils/schedule'
 
 function ChatIcon({ className }: { className?: string }) {
   return (
@@ -48,6 +50,7 @@ export default function MainPage({
   const [popupOpen, setPopupOpen] = useState(false)
   const [expandedOpen, setExpandedOpen] = useState(false)
   const [selectedCourses, setSelectedCourses] = useState<Course[]>([])
+  const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -82,6 +85,10 @@ export default function MainPage({
     () => new Set(selectedCourses.map((c) => c.id)),
     [selectedCourses],
   )
+  const hoveredConflictIds = useMemo(
+    () => getConflictingCourseIds(hoveredCourse, selectedCourses),
+    [hoveredCourse, selectedCourses],
+  )
 
   function addCourse(course: Course) {
     setSelectedCourses((prev) => {
@@ -92,6 +99,14 @@ export default function MainPage({
 
   function removeCourse(courseId: string) {
     setSelectedCourses((prev) => prev.filter((c) => c.id !== courseId))
+  }
+
+  function replaceConflictingCourses(course: Course) {
+    setSelectedCourses((prev) => {
+      const conflicts = getConflictingCourseIds(course, prev)
+      const next = prev.filter((c) => c.id !== course.id && !conflicts.has(c.id))
+      return [...next, course]
+    })
   }
 
   return (
@@ -174,8 +189,11 @@ export default function MainPage({
           <CourseTable
             courses={allCourses}
             selectedIds={selectedIds}
+            selectedCourses={selectedCourses}
             onAddCourse={addCourse}
             onRemoveCourse={removeCourse}
+            onHoverCourse={setHoveredCourse}
+            onReplaceCourse={replaceConflictingCourses}
           />
         </section>
 
@@ -195,29 +213,39 @@ export default function MainPage({
               </div>
             </div>
 
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
               {selectedCourses.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
                   Open the assistant and add a course to build your timetable.
                 </div>
               ) : (
-                selectedCourses.map((c) => (
+                selectedCourses.map((c, index) => (
                   <div
                     key={c.id}
                     className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
                   >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900">
-                        {c.name}
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div
+                        className={cn(
+                          'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-black text-white shadow-sm ring-1',
+                          courseColor(index),
+                        )}
+                      >
+                        {index + 1}
                       </div>
-                      <div className="truncate text-xs text-slate-500">
-                        {c.timeText}
-                      </div>
-                      {c.locationText ? (
-                        <div className="truncate text-xs text-slate-500">
-                          Location: {c.locationText}
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">
+                          {c.name}
                         </div>
-                      ) : null}
+                        <div className="truncate text-xs text-slate-500">
+                          {c.timeText}
+                        </div>
+                        {c.locationText ? (
+                          <div className="truncate text-xs text-slate-500">
+                            Location: {c.locationText}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <div className="text-xs font-semibold text-slate-600">
@@ -241,6 +269,8 @@ export default function MainPage({
           <Timetable
             courses={selectedCourses}
             variant="mini"
+            overlayCourse={hoveredCourse}
+            conflictIds={hoveredConflictIds}
             onClick={() => setExpandedOpen(true)}
           />
         </aside>
@@ -265,6 +295,7 @@ export default function MainPage({
         selectedIds={selectedIds}
         onAddCourse={addCourse}
         onRemoveCourse={removeCourse}
+        onReplaceCourse={replaceConflictingCourses}
         onOpenExpandedTimetable={() => setExpandedOpen(true)}
       />
 

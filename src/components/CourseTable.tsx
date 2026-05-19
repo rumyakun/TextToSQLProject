@@ -1,5 +1,6 @@
 import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
+import { getConflictingCourseIds } from '../utils/schedule'
 
 const statusStyles: Record<Course['status'], string> = {
   Open: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
@@ -7,16 +8,37 @@ const statusStyles: Record<Course['status'], string> = {
   Waitlist: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
 }
 
+function departmentColor({
+  selected,
+  hasConflict,
+  closed,
+}: {
+  selected: boolean
+  hasConflict: boolean
+  closed: boolean
+}) {
+  if (selected) return 'text-rose-700'
+  if (hasConflict) return 'text-amber-700'
+  if (closed) return 'text-slate-900'
+  return 'text-blue-700'
+}
+
 export default function CourseTable({
   courses,
   selectedIds,
+  selectedCourses,
   onAddCourse,
   onRemoveCourse,
+  onHoverCourse,
+  onReplaceCourse,
 }: {
   courses: Course[]
   selectedIds: Set<string>
+  selectedCourses: Course[]
   onAddCourse: (course: Course) => void
   onRemoveCourse: (courseId: string) => void
+  onHoverCourse: (course: Course | null) => void
+  onReplaceCourse: (course: Course) => void
 }) {
   return (
     <div className="flex max-h-[calc(100vh-8.5rem)] min-h-[28rem] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -51,28 +73,44 @@ export default function CourseTable({
           <tbody className="divide-y divide-slate-100 text-sm">
             {courses.map((c) => {
               const selected = selectedIds.has(c.id)
+              const hasConflict = getConflictingCourseIds(c, selectedCourses).size > 0
+              const closed = c.status === 'Closed'
               return (
                 <tr
                   key={c.id}
+                  onMouseEnter={() => onHoverCourse(c)}
+                  onMouseLeave={() => onHoverCourse(null)}
                   className={cn(
                     'hover:bg-slate-50/70',
                     selected && 'bg-blue-50/40',
+                    hasConflict && !selected && 'bg-amber-50/40',
                   )}
                 >
                   <td className="px-5 py-4">
                     <button
                       type="button"
-                      onClick={() =>
-                        selected ? onRemoveCourse(c.id) : onAddCourse(c)
-                      }
+                      onMouseEnter={() => onHoverCourse(c)}
+                      onFocus={() => onHoverCourse(c)}
+                      onBlur={() => onHoverCourse(null)}
+                      onClick={() => {
+                        if (selected) {
+                          onRemoveCourse(c.id)
+                        } else if (hasConflict) {
+                          onReplaceCourse(c)
+                        } else {
+                          onAddCourse(c)
+                        }
+                      }}
                       className={cn(
                         'h-8 rounded-lg px-3 text-xs font-semibold transition',
                         selected
-                          ? 'bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
-                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+                          ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800'
+                          : hasConflict
+                            ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
                       )}
                     >
-                      {selected ? 'REMOVE' : 'ADD'}
+                      {selected ? 'REMOVE' : hasConflict ? 'REPLACE' : 'ADD'}
                     </button>
                   </td>
                   <td className="px-5 py-4">
@@ -80,7 +118,12 @@ export default function CourseTable({
                       <div className="mt-0.5 h-2.5 w-2.5 rounded-full bg-blue-600/90" />
                       <div className="min-w-0">
                         {c.departmentName ? (
-                          <div className="mb-1 truncate text-[11px] font-semibold text-blue-700">
+                          <div
+                            className={cn(
+                              'mb-1 truncate text-[11px] font-semibold',
+                              departmentColor({ selected, hasConflict, closed }),
+                            )}
+                          >
                             {c.departmentName}
                           </div>
                         ) : null}

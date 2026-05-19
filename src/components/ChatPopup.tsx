@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Course, CourseDetail } from '../types/course'
 import { cn } from '../utils/cn'
+import { getConflictingCourseIds } from '../utils/schedule'
 import Timetable from './Timetable'
 
 type ChatMessage = {
@@ -22,6 +23,21 @@ type QueryScheduleSlot = {
   start?: unknown
   end?: unknown
   room?: unknown
+}
+
+function departmentColor({
+  selected,
+  hasConflict,
+  closed,
+}: {
+  selected: boolean
+  hasConflict: boolean
+  closed: boolean
+}) {
+  if (selected) return 'text-rose-700'
+  if (hasConflict) return 'text-amber-700'
+  if (closed) return 'text-slate-900'
+  return 'text-blue-700'
 }
 
 function makeId(prefix: string) {
@@ -282,6 +298,7 @@ export default function ChatPopup({
   selectedIds,
   onAddCourse,
   onRemoveCourse,
+  onReplaceCourse,
   onOpenExpandedTimetable,
 }: {
   open: boolean
@@ -290,6 +307,7 @@ export default function ChatPopup({
   selectedIds: Set<string>
   onAddCourse: (course: Course) => void
   onRemoveCourse: (courseId: string) => void
+  onReplaceCourse: (course: Course) => void
   onOpenExpandedTimetable: () => void
 }) {
   const [mounted, setMounted] = useState(false)
@@ -307,6 +325,7 @@ export default function ChatPopup({
   const [lastWarning, setLastWarning] = useState('')
   const [lastError, setLastError] = useState('')
   const [dbCourses, setDbCourses] = useState<Course[] | null>(null)
+  const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
@@ -341,6 +360,10 @@ export default function ChatPopup({
     if (dbCourses === null) return []
     return dbCourses
   }, [dbCourses])
+  const hoveredConflictIds = useMemo(
+    () => getConflictingCourseIds(hoveredCourse, selectedCourses),
+    [hoveredCourse, selectedCourses],
+  )
 
   async function send() {
     const text = input.trim()
@@ -546,18 +569,36 @@ export default function ChatPopup({
                   {results.length} items
                 </div>
               </div>
-              <div className="mt-2 min-h-36 space-y-2 pr-1">
+              <div className="mt-2 max-h-72 min-h-36 space-y-2 overflow-y-auto pr-1">
                 {results.map((c) => {
                   const already = selectedIds.has(c.id)
+                  const hasConflict = getConflictingCourseIds(c, selectedCourses).size > 0
+                  const closed = c.status === 'Closed'
                   return (
                     <div
                       key={c.id}
+                      onMouseEnter={() => setHoveredCourse(c)}
+                      onMouseLeave={() => setHoveredCourse(null)}
                       className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
                       title={detailTitle(c)}
                     >
                       <div className="min-w-0">
+                        {c.departmentName ? (
+                          <div
+                            className={cn(
+                              'mb-1 truncate text-[11px] font-semibold',
+                              departmentColor({
+                                selected: already,
+                                hasConflict,
+                                closed,
+                              }),
+                            )}
+                          >
+                            {c.departmentName}
+                          </div>
+                        ) : null}
                         <div className="truncate text-sm font-semibold text-slate-900">
-                          {c.name}
+                          {c.name} - {c.id}
                         </div>
                         <div className="truncate text-xs text-slate-500">
                           {c.professor} · {c.timeText}
@@ -566,17 +607,28 @@ export default function ChatPopup({
                       </div>
                       <button
                         type="button"
-                        onClick={() =>
-                          already ? onRemoveCourse(c.id) : onAddCourse(c)
-                        }
+                        onMouseEnter={() => setHoveredCourse(c)}
+                        onFocus={() => setHoveredCourse(c)}
+                        onBlur={() => setHoveredCourse(null)}
+                        onClick={() => {
+                          if (already) {
+                            onRemoveCourse(c.id)
+                          } else if (hasConflict) {
+                            onReplaceCourse(c)
+                          } else {
+                            onAddCourse(c)
+                          }
+                        }}
                         className={cn(
                           'h-9 shrink-0 rounded-lg px-3 text-xs font-semibold transition',
                           already
-                            ? 'bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-700'
-                            : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800'
+                            : hasConflict
+                              ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                              : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
                         )}
                       >
-                        {already ? 'Remove' : 'Add'}
+                        {already ? 'Remove' : hasConflict ? 'Replace' : 'Add'}
                       </button>
                     </div>
                   )
@@ -597,6 +649,8 @@ export default function ChatPopup({
             <Timetable
               courses={selectedCourses}
               variant="mini"
+              overlayCourse={hoveredCourse}
+              conflictIds={hoveredConflictIds}
               onClick={onOpenExpandedTimetable}
             />
           </div>
