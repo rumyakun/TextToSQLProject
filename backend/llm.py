@@ -8,8 +8,8 @@ from .prompt import build_prompt
 
 
 def _ollama_generate(prompt: str) -> str:
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
-    configured_model = os.getenv("OLLAMA_MODEL", "text2sql-local").strip()
+    base_url = os.getenv("OLLAMA_BASE_URL", ).strip().rstrip("/")
+    configured_model = os.getenv("OLLAMA_MODEL", ).strip()
     if not configured_model:
         raise RuntimeError("OLLAMA_MODEL is not set")
 
@@ -29,7 +29,7 @@ def _ollama_generate(prompt: str) -> str:
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
-                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "10m"),
+                "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", ),
                 "options": {
                     "temperature": 0.0,
                 },

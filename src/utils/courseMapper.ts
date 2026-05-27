@@ -7,15 +7,17 @@ const weekdayMap: Record<WeekdayApi, Weekday | null> = {
   WED: 'Wed',
   THU: 'Thu',
   FRI: 'Fri',
-  SAT: null,
+  SAT: 'Sat',
   SUN: null,
 }
 
-function parseHour(value: string) {
-  const match = value.match(/\d{1,2}/)
+function parseClockHour(value: string) {
+  const match = value.match(/(\d{1,2})(?::([0-5]\d))?/)
   if (!match) return null
-  const hour = Number(match[0])
-  return Number.isFinite(hour) ? hour : null
+  const hour = Number(match[1])
+  const minute = Number(match[2] ?? '0')
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  return hour + minute / 60
 }
 
 function apiStatus(course: CourseItemApi): Course['status'] {
@@ -33,8 +35,8 @@ export function apiCourseToCourse(course: CourseItemApi): Course {
   const slots = course.schedule
     .map((slot) => {
       const day = weekdayMap[slot.day]
-      const startHour = parseHour(slot.start)
-      const endHour = parseHour(slot.end)
+      const startHour = parseClockHour(slot.start)
+      const endHour = parseClockHour(slot.end)
       if (!day || startHour === null || endHour === null || endHour <= startHour) {
         return null
       }
@@ -52,10 +54,15 @@ export function apiCourseToCourse(course: CourseItemApi): Course {
   return {
     id: course.courseId,
     name: course.name,
+    departmentName: course.departmentName,
     professor: course.professor,
     credits: course.credits,
     status: apiStatus(course),
+    capacity: course.capacity,
+    enrolled: course.enrolled,
     timeText,
+    locationText: course.locationText,
     slots,
+    details: course.details,
   }
 }

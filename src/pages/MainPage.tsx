@@ -3,11 +3,12 @@ import ChatPopup from '../components/ChatPopup'
 import CourseTable from '../components/CourseTable'
 import ExpandedTimetableModal from '../components/ExpandedTimetableModal'
 import Timetable from '../components/Timetable'
-import { mockCourses } from '../mock/courses'
 import { coursesApi } from '../services/api'
 import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
+import { courseColor } from '../utils/courseColors'
 import { apiCourseToCourse } from '../utils/courseMapper'
+import { getConflictingCourseIds } from '../utils/schedule'
 
 function ChatIcon({ className }: { className?: string }) {
   return (
@@ -45,10 +46,11 @@ export default function MainPage({
   onLoginClick,
   onLogout,
 }: MainPageProps) {
-  const [allCourses, setAllCourses] = useState<Course[]>(mockCourses)
+  const [allCourses, setAllCourses] = useState<Course[]>([])
   const [popupOpen, setPopupOpen] = useState(false)
   const [expandedOpen, setExpandedOpen] = useState(false)
   const [selectedCourses, setSelectedCourses] = useState<Course[]>([])
+  const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -67,7 +69,7 @@ export default function MainPage({
         }
       } catch {
         if (!disposed) {
-          setAllCourses(mockCourses)
+          setAllCourses([])
         }
       }
     }
@@ -83,11 +85,27 @@ export default function MainPage({
     () => new Set(selectedCourses.map((c) => c.id)),
     [selectedCourses],
   )
+  const hoveredConflictIds = useMemo(
+    () => getConflictingCourseIds(hoveredCourse, selectedCourses),
+    [hoveredCourse, selectedCourses],
+  )
 
   function addCourse(course: Course) {
     setSelectedCourses((prev) => {
       if (prev.some((c) => c.id === course.id)) return prev
       return [...prev, course]
+    })
+  }
+
+  function removeCourse(courseId: string) {
+    setSelectedCourses((prev) => prev.filter((c) => c.id !== courseId))
+  }
+
+  function replaceConflictingCourses(course: Course) {
+    setSelectedCourses((prev) => {
+      const conflicts = getConflictingCourseIds(course, prev)
+      const next = prev.filter((c) => c.id !== course.id && !conflicts.has(c.id))
+      return [...next, course]
     })
   }
 
@@ -168,7 +186,15 @@ export default function MainPage({
 
       <main className="mx-auto grid max-w-7xl grid-cols-1 gap-5 px-4 py-6 sm:px-6 lg:grid-cols-[1.45fr_0.95fr]">
         <section className="min-w-0">
-          <CourseTable courses={allCourses} selectedIds={selectedIds} />
+          <CourseTable
+            courses={allCourses}
+            selectedIds={selectedIds}
+            selectedCourses={selectedCourses}
+            onAddCourse={addCourse}
+            onRemoveCourse={removeCourse}
+            onHoverCourse={setHoveredCourse}
+            onReplaceCourse={replaceConflictingCourses}
+          />
         </section>
 
         <aside className="space-y-5">
@@ -187,27 +213,52 @@ export default function MainPage({
               </div>
             </div>
 
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
               {selectedCourses.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
                   Open the assistant and add a course to build your timetable.
                 </div>
               ) : (
-                selectedCourses.map((c) => (
+                selectedCourses.map((c, index) => (
                   <div
                     key={c.id}
                     className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
                   >
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-slate-900">
-                        {c.name}
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div
+                        className={cn(
+                          'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-black text-white shadow-sm ring-1',
+                          courseColor(index),
+                        )}
+                      >
+                        {index + 1}
                       </div>
-                      <div className="truncate text-xs text-slate-500">
-                        {c.timeText}
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">
+                          {c.name}
+                        </div>
+                        <div className="truncate text-xs text-slate-500">
+                          {c.timeText}
+                        </div>
+                        {c.locationText ? (
+                          <div className="truncate text-xs text-slate-500">
+                            Location: {c.locationText}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
-                    <div className="shrink-0 text-xs font-semibold text-slate-600">
-                      {c.credits}cr
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div className="text-xs font-semibold text-slate-600">
+                        {c.credits > 0 ? `${c.credits}cr` : 'Credits TBA'}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeCourse(c.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-700"
+                        aria-label={`Remove ${c.name}`}
+                      >
+                        <span className="text-base leading-none">×</span>
+                      </button>
                     </div>
                   </div>
                 ))
@@ -218,6 +269,8 @@ export default function MainPage({
           <Timetable
             courses={selectedCourses}
             variant="mini"
+            overlayCourse={hoveredCourse}
+            conflictIds={hoveredConflictIds}
             onClick={() => setExpandedOpen(true)}
           />
         </aside>
@@ -238,10 +291,11 @@ export default function MainPage({
       <ChatPopup
         open={popupOpen}
         onClose={() => setPopupOpen(false)}
-        allCourses={allCourses}
         selectedCourses={selectedCourses}
         selectedIds={selectedIds}
         onAddCourse={addCourse}
+        onRemoveCourse={removeCourse}
+        onReplaceCourse={replaceConflictingCourses}
         onOpenExpandedTimetable={() => setExpandedOpen(true)}
       />
 
