@@ -1,3 +1,4 @@
+import logging
 import time
 
 from .db import run_query
@@ -6,6 +7,9 @@ from .llm import fix_sql, generate_sql
 from .redis_cache import get_cache, set_cache
 from .utils import log_query
 from .validate import validate_generated_sql
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 def enforce_limit(sql):
@@ -65,6 +69,7 @@ def process(query):
         t_llm = time.perf_counter()
         sql = generate_sql(normalized_query)
         timings["llm_ms"] = int((time.perf_counter() - t_llm) * 1000)
+        logger.info("LLM generated SQL | query=%r | sql=%s", normalized_query, sql)
 
         if not sql or sql == "UNKNOWN":
             return {"error": "질문이 모호합니다."}
@@ -126,6 +131,12 @@ def process(query):
             t_fix = time.perf_counter()
             fixed = fix_sql(normalized_query, sql, str(e))
             timings["llm_ms"] += int((time.perf_counter() - t_fix) * 1000)
+            logger.info(
+                "LLM fixed SQL | query=%r | original_sql=%s | fixed_sql=%s",
+                normalized_query,
+                sql,
+                fixed,
+            )
 
             fixed = enforce_limit(fixed)
             t_val = time.perf_counter()
