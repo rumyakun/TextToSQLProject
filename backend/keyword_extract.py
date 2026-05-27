@@ -109,11 +109,11 @@ def build_postgres_dsn() -> str:
     if database_url:
         return database_url
 
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "4231")
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    database = os.getenv("POSTGRES_DB", "postgres")
+    user = os.getenv("POSTGRES_USER", )
+    password = os.getenv("POSTGRES_PASSWORD", )
+    host = os.getenv("POSTGRES_HOST", )
+    port = os.getenv("POSTGRES_PORT", )
+    database = os.getenv("POSTGRES_DB", )
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
 

@@ -3,7 +3,7 @@ import os
 import psycopg2
 
 def run_query(sql):
-    dsn = os.getenv("DATABASE_URL", "postgresql://postgres:4231@localhost:5432/postgres").strip()
+    dsn = os.getenv("DATABASE_URL", ).strip()
     if not dsn:
         raise RuntimeError("DATABASE_URL is not set")
 

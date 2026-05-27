@@ -38,7 +38,7 @@ export default function ExpandedTimetableModal({
               Expanded Timetable
             </div>
             <div className="text-xs text-slate-500">
-              Mon–Fri · 9–18 · {courses.length} selected
+              Mon-Sat · 9-22 · {courses.length} selected
             </div>
           </div>
           <button

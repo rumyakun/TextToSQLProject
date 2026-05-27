@@ -1,54 +1,36 @@
 import type { ElementType } from 'react'
 import type { Course, Weekday } from '../types/course'
 import { cn } from '../utils/cn'
+import { courseColor } from '../utils/courseColors'
 
-const days: Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+const days: Weekday[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-function dayLabel(d: Weekday) {
-  switch (d) {
-    case 'Mon':
-      return 'Mon'
-    case 'Tue':
-      return 'Tue'
-    case 'Wed':
-      return 'Wed'
-    case 'Thu':
-      return 'Thu'
-    case 'Fri':
-      return 'Fri'
-  }
-}
-
-function courseColor(id: string) {
-  const palette = [
-    'bg-blue-600/90 ring-blue-200',
-    'bg-indigo-600/90 ring-indigo-200',
-    'bg-sky-600/90 ring-sky-200',
-    'bg-cyan-600/90 ring-cyan-200',
-    'bg-violet-600/90 ring-violet-200',
-    'bg-emerald-600/90 ring-emerald-200',
-    'bg-rose-600/90 ring-rose-200',
-  ]
-  let hash = 0
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0
-  return palette[hash % palette.length]
+function formatHour(value: number) {
+  const hour = Math.floor(value)
+  const minute = Math.round((value - hour) * 60)
+  return `${hour}:${String(minute).padStart(2, '0')}`
 }
 
 export default function Timetable({
   courses,
   variant,
   onClick,
+  overlayCourse,
+  conflictIds,
 }: {
   courses: Course[]
   variant: 'mini' | 'full'
   onClick?: () => void
+  overlayCourse?: Course | null
+  conflictIds?: Set<string>
 }) {
   const startHour = 9
-  const endHour = 18
+  const endHour = 22
   const hours = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i)
 
   const hourHeight = variant === 'mini' ? 16 : 44
   const totalHeight = (endHour - startHour) * hourHeight
+  const overlayHasConflict = (conflictIds?.size ?? 0) > 0
 
   const Wrapper: ElementType = onClick ? 'button' : 'div'
   const wrapperProps = onClick
@@ -106,11 +88,11 @@ export default function Timetable({
               ))}
             </div>
 
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-6 gap-2">
               {days.map((d) => (
                 <div key={d} className="min-w-0">
                   <div className="mb-1.5 text-center font-semibold text-slate-600">
-                    {dayLabel(d)}
+                    {d}
                   </div>
                   <div
                     className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
@@ -124,34 +106,70 @@ export default function Timetable({
                       />
                     ))}
 
-                    {courses.flatMap((c) =>
+                    {courses.flatMap((c, courseIndex) =>
                       c.slots
                         .filter((s) => s.day === d)
                         .map((s) => {
                           const top = (s.startHour - startHour) * hourHeight
                           const height = Math.max(1, (s.endHour - s.startHour) * hourHeight)
+                          const conflicting = conflictIds?.has(c.id) ?? false
                           return (
                             <div
                               key={`${c.id}-${d}-${s.startHour}-${s.endHour}`}
                               className={cn(
                                 'absolute left-1 right-1 rounded-md px-2 py-1 text-white shadow-sm ring-1',
-                                courseColor(c.id),
+                                conflicting
+                                  ? 'bg-amber-400/90 text-slate-900 ring-amber-200'
+                                  : courseColor(courseIndex),
                               )}
                               style={{ top, height }}
-                              title={`${c.name} (${s.startHour}:00-${s.endHour}:00)`}
+                              title={`${c.name} (${formatHour(s.startHour)}-${formatHour(s.endHour)})`}
                             >
-                              <div className={cn('truncate font-semibold', variant === 'mini' ? 'text-[10px]' : 'text-xs')}>
-                                {c.name}
-                              </div>
+                              {variant === 'mini' ? (
+                                <div className="flex h-full items-center justify-center text-xs font-black">
+                                  {courseIndex + 1}
+                                </div>
+                              ) : (
+                                <div className="truncate text-xs font-semibold">
+                                  {courseIndex + 1}. {c.name}
+                                </div>
+                              )}
                               {variant === 'full' ? (
                                 <div className="mt-0.5 truncate text-[11px] opacity-90">
-                                  {s.startHour}:00–{s.endHour}:00
+                                  {formatHour(s.startHour)}-{formatHour(s.endHour)}
                                 </div>
                               ) : null}
                             </div>
                           )
                         }),
                     )}
+
+                    {overlayCourse?.slots
+                      .filter((s) => s.day === d)
+                      .map((s) => {
+                        const top = (s.startHour - startHour) * hourHeight
+                        const height = Math.max(1, (s.endHour - s.startHour) * hourHeight)
+                        return (
+                          <div
+                            key={`overlay-${overlayCourse.id}-${d}-${s.startHour}-${s.endHour}`}
+                            className={cn(
+                              'pointer-events-none absolute rounded-md border border-slate-500/50 bg-slate-500/65 px-2 py-1 text-white shadow-sm ring-1 ring-slate-300',
+                              overlayHasConflict ? 'left-3 right-1' : 'left-1 right-1',
+                            )}
+                            style={{ top, height }}
+                            title={`${overlayCourse.name} preview (${formatHour(s.startHour)}-${formatHour(s.endHour)})`}
+                          >
+                            <div className={cn('truncate font-semibold', variant === 'mini' ? 'text-[10px]' : 'text-xs')}>
+                              {overlayCourse.name}
+                            </div>
+                            {variant === 'full' ? (
+                              <div className="mt-0.5 truncate text-[11px] opacity-90">
+                                {formatHour(s.startHour)}-{formatHour(s.endHour)}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
                   </div>
                 </div>
               ))}
@@ -168,4 +186,3 @@ export default function Timetable({
     </Wrapper>
   )
 }
-
