@@ -651,11 +651,18 @@ export default function ChatPopup({
                           {c.professor} · {c.timeText}
                           {c.locationText ? ` · Location: ${c.locationText}` : ''}
                         </div>
-                        {unmetPrerequisite ? (
-                          <div className="mt-1 inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
-                            Prerequisite warning
-                          </div>
-                        ) : null}
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {closed ? (
+                            <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
+                              Capacity warning
+                            </span>
+                          ) : null}
+                          {unmetPrerequisite ? (
+                            <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                              Prerequisite warning
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <button
                         type="button"
