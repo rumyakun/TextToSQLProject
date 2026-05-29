@@ -8,6 +8,12 @@ import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
 import { courseColor } from '../utils/courseColors'
 import { apiCourseToCourse } from '../utils/courseMapper'
+import {
+  extractCompletedCourseCodes,
+  formatPrerequisites,
+  getUnmetPrerequisiteCodes,
+  getUnmetPrerequisiteNames,
+} from '../utils/prerequisites'
 import { getConflictingCourseIds } from '../utils/schedule'
 
 function ChatIcon({ className }: { className?: string }) {
@@ -37,12 +43,37 @@ function ChatIcon({ className }: { className?: string }) {
 
 type MainPageProps = {
   userName?: string
+  completedCourses?: unknown[]
   onLoginClick: () => void
   onLogout: () => void
 }
 
+function buildCoursePrompt(
+  course: Course,
+  action: 'add' | 'replace',
+  completedCourseCodes: Set<string> | null,
+) {
+  const closed =
+    typeof course.capacity === 'number' &&
+    typeof course.enrolled === 'number' &&
+    course.capacity > 0 &&
+    course.enrolled >= course.capacity
+  const unmetPrerequisiteCodes = getUnmetPrerequisiteCodes(course, completedCourseCodes)
+
+  if (!closed && unmetPrerequisiteCodes.length === 0) return null
+
+  return {
+    course,
+    action,
+    closed,
+    unmetPrerequisiteCodes,
+    unmetPrerequisiteNames: getUnmetPrerequisiteNames(course, unmetPrerequisiteCodes),
+  }
+}
+
 export default function MainPage({
   userName,
+  completedCourses,
   onLoginClick,
   onLogout,
 }: MainPageProps) {
@@ -51,15 +82,28 @@ export default function MainPage({
   const [expandedOpen, setExpandedOpen] = useState(false)
   const [selectedCourses, setSelectedCourses] = useState<Course[]>([])
   const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
+  const [courseSearch, setCourseSearch] = useState('')
+  const [coursePrompt, setCoursePrompt] = useState<{
+    course: Course
+    action: 'add' | 'replace'
+    closed: boolean
+    unmetPrerequisiteCodes: string[]
+    unmetPrerequisiteNames: Array<string | undefined>
+  } | null>(null)
 
   useEffect(() => {
     let disposed = false
+    const timeoutId = window.setTimeout(() => {
+      void loadCourses()
+    }, 250)
 
     async function loadCourses() {
       try {
+        const keyword = courseSearch.trim()
         const result = await coursesApi.getCourses({
           year: new Date().getFullYear(),
           semester: '1',
+          keyword: keyword || undefined,
           page: 1,
           pageSize: 200,
         })
@@ -74,12 +118,11 @@ export default function MainPage({
       }
     }
 
-    void loadCourses()
-
     return () => {
       disposed = true
+      window.clearTimeout(timeoutId)
     }
-  }, [])
+  }, [courseSearch])
 
   const selectedIds = useMemo(
     () => new Set(selectedCourses.map((c) => c.id)),
@@ -89,19 +132,19 @@ export default function MainPage({
     () => getConflictingCourseIds(hoveredCourse, selectedCourses),
     [hoveredCourse, selectedCourses],
   )
+  const completedCourseCodes = useMemo(
+    () => extractCompletedCourseCodes(completedCourses),
+    [completedCourses],
+  )
 
-  function addCourse(course: Course) {
+  function addCourseDirect(course: Course) {
     setSelectedCourses((prev) => {
       if (prev.some((c) => c.id === course.id)) return prev
       return [...prev, course]
     })
   }
 
-  function removeCourse(courseId: string) {
-    setSelectedCourses((prev) => prev.filter((c) => c.id !== courseId))
-  }
-
-  function replaceConflictingCourses(course: Course) {
+  function replaceConflictingCoursesDirect(course: Course) {
     setSelectedCourses((prev) => {
       const conflicts = getConflictingCourseIds(course, prev)
       const next = prev.filter((c) => c.id !== course.id && !conflicts.has(c.id))
@@ -109,8 +152,92 @@ export default function MainPage({
     })
   }
 
+  function addCourse(course: Course) {
+    const warning = buildCoursePrompt(course, 'add', completedCourseCodes)
+    if (warning) {
+      setCoursePrompt(warning)
+      return
+    }
+    addCourseDirect(course)
+  }
+
+  function removeCourse(courseId: string) {
+    setSelectedCourses((prev) => prev.filter((c) => c.id !== courseId))
+  }
+
+  function replaceConflictingCourses(course: Course) {
+    const warning = buildCoursePrompt(course, 'replace', completedCourseCodes)
+    if (warning) {
+      setCoursePrompt(warning)
+      return
+    }
+    replaceConflictingCoursesDirect(course)
+  }
+
+  function confirmCoursePrompt() {
+    if (!coursePrompt) return
+    if (coursePrompt.action === 'replace') {
+      replaceConflictingCoursesDirect(coursePrompt.course)
+    } else {
+      addCourseDirect(coursePrompt.course)
+    }
+    setCoursePrompt(null)
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
+      {coursePrompt ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/35 px-4">
+          <div
+            className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-5 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-warning-title"
+          >
+            <div id="course-warning-title" className="text-sm font-semibold text-slate-900">
+              확인이 필요한 강의입니다
+            </div>
+            <div className="mt-2 text-sm text-slate-600">
+              {coursePrompt.course.name}을(를) 시간표에 담기 전에 확인해 주세요.
+            </div>
+            <div className="mt-3 space-y-2">
+              {coursePrompt.closed ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                  정원이 마감되었거나 초과된 강의입니다.
+                </div>
+              ) : null}
+              {coursePrompt.unmetPrerequisiteCodes.length > 0 ? (
+                <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-medium text-violet-900">
+                  선수과목을 아직 이수하지 않았습니다:
+                  <span className="ml-1">
+                    {formatPrerequisites(
+                      coursePrompt.unmetPrerequisiteCodes,
+                      coursePrompt.unmetPrerequisiteNames,
+                    )}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCoursePrompt(null)}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={confirmCoursePrompt}
+                className="h-9 rounded-lg bg-violet-700 px-3 text-sm font-semibold text-white transition hover:bg-violet-800"
+              >
+                그래도 담기
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-4 sm:px-6">
           <div className="flex items-center gap-3">
@@ -130,7 +257,9 @@ export default function MainPage({
           <div className="ml-auto w-full max-w-xl">
             <div className="relative">
               <input
-                placeholder="Search courses (UI only)"
+                value={courseSearch}
+                onChange={(event) => setCourseSearch(event.target.value)}
+                placeholder="Search by course name"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 pr-12 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
               />
               <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
@@ -190,6 +319,7 @@ export default function MainPage({
             courses={allCourses}
             selectedIds={selectedIds}
             selectedCourses={selectedCourses}
+            completedCourseCodes={completedCourseCodes}
             onAddCourse={addCourse}
             onRemoveCourse={removeCourse}
             onHoverCourse={setHoveredCourse}
@@ -293,6 +423,7 @@ export default function MainPage({
         onClose={() => setPopupOpen(false)}
         selectedCourses={selectedCourses}
         selectedIds={selectedIds}
+        completedCourseCodes={completedCourseCodes}
         onAddCourse={addCourse}
         onRemoveCourse={removeCourse}
         onReplaceCourse={replaceConflictingCourses}

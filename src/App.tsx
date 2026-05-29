@@ -81,6 +81,7 @@ export default function App() {
   return (
     <MainPage
       userName={currentUser?.name}
+      completedCourses={currentUser?.completedCourses}
       onLoginClick={() => setAuthPageOpen(true)}
       onLogout={handleLogout}
     />

@@ -23,6 +23,8 @@ export type Course = {
   timeText: string
   locationText?: string
   slots: CourseTimeSlot[]
+  prerequisiteCourseCodes?: string[]
+  prerequisiteCourseNames?: string[]
   details?: CourseDetail[]
 }
 

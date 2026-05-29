@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Course, CourseDetail } from '../types/course'
 import { cn } from '../utils/cn'
+import {
+  normalizeCourseDay,
+  parseCourseClockHour,
+  parseCourseSlotsFromText,
+} from '../utils/courseSchedule'
+import { hasUnmetPrerequisite } from '../utils/prerequisites'
 import { getConflictingCourseIds } from '../utils/schedule'
 import Timetable from './Timetable'
 
@@ -71,6 +77,16 @@ function readNumber(row: QueryRow, keys: string[]) {
   return undefined
 }
 
+function readStringList(row: QueryRow, keys: string[]) {
+  const text = readString(row, keys)
+  const ignored = new Set(['', '없음', 'none', 'null', '-'])
+  if (ignored.has(text.trim().toLowerCase())) return []
+  return text
+    .split(/[,;/\n]+/)
+    .map((part) => part.trim())
+    .filter((part) => part && !ignored.has(part.toLowerCase()))
+}
+
 function readDetails(row: QueryRow): CourseDetail[] {
   const labels: Array<[string, string]> = [
     ['course_year', '학년'],
@@ -90,7 +106,10 @@ function readDetails(row: QueryRow): CourseDetail[] {
     ['day_of_week', '요일'],
     ['start_time', '시작'],
     ['end_time', '종료'],
+    ['table_schedule', '시간표'],
     ['classroom', '강의실'],
+    ['prereq_subject_codes', '선수과목 코드'],
+    ['prereq_subject_names', '선수과목명'],
   ]
 
   return labels.flatMap(([key, label]) => {
@@ -116,43 +135,15 @@ function detailTitle(course: Course) {
 }
 
 function normalizeDay(value: string): Course['slots'][number]['day'] | null {
-  const normalized = value.trim().toLowerCase()
-  if (['mon', 'monday', '월', '월요일'].includes(normalized)) return 'Mon'
-  if (['tue', 'tues', 'tuesday', '화', '화요일'].includes(normalized)) return 'Tue'
-  if (['wed', 'wednesday', '수', '수요일'].includes(normalized)) return 'Wed'
-  if (['thu', 'thur', 'thurs', 'thursday', '목', '목요일'].includes(normalized)) return 'Thu'
-  if (['fri', 'friday', '금', '금요일'].includes(normalized)) return 'Fri'
-  if (['sat', 'saturday', '토', '토요일'].includes(normalized)) return 'Sat'
-  return null
+  return normalizeCourseDay(value)
 }
 
 function parseClockHour(value: string) {
-  const match = value.match(/(\d{1,2})(?::([0-5]\d))?/)
-  if (!match) return null
-  const hour = Number(match[1])
-  const minute = Number(match[2] ?? '0')
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
-  return hour + minute / 60
+  return parseCourseClockHour(value)
 }
 
 function parseSlots(timeText: string): Course['slots'] {
-  const slots: Course['slots'] = []
-  const parts = timeText.split(/[,;/]+/)
-
-  for (const part of parts) {
-    const match = part.match(
-      /(mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|월요일?|화요일?|수요일?|목요일?|금요일?|토요일?)\s*[\s(]*([0-2]?\d(?::[0-5]\d)?)\s*[-~]\s*([0-2]?\d(?::[0-5]\d)?)/i,
-    )
-    if (!match) continue
-
-    const day = normalizeDay(match[1])
-    const startHour = parseClockHour(match[2])
-    const endHour = parseClockHour(match[3])
-    if (!day || startHour === null || endHour === null || endHour <= startHour) continue
-    slots.push({ day, startHour, endHour })
-  }
-
-  return slots
+  return parseCourseSlotsFromText(timeText)
 }
 
 function readScheduleSlots(row: QueryRow): Course['slots'] {
@@ -211,7 +202,7 @@ function rowToCourse(row: QueryRow, index: number): Course {
     readString(row, ['professor', 'instructor', 'teacher', '교수']) || '-'
   const credits = readNumber(row, ['credit_hours', 'credits', 'credit', '학점']) ?? 0
   const timeText =
-    readString(row, ['lecture_time', 'time_text', 'time', '시간']) ||
+    readString(row, ['lecture_time', 'table_schedule', 'time_text', 'time', '시간']) ||
     'Time TBA'
   const slots = [
     ...readScheduleSlots(row),
@@ -222,7 +213,7 @@ function rowToCourse(row: QueryRow, index: number): Course {
   const capacity = readNumber(row, ['capacity', '정원'])
   const enrolled = readNumber(row, ['enrolled', 'registered', '수강인원'])
   const status =
-    capacity !== undefined && enrolled !== undefined && enrolled >= capacity
+    capacity !== undefined && enrolled !== undefined && capacity > 0 && enrolled >= capacity
       ? 'Closed'
       : 'Open'
 
@@ -238,6 +229,8 @@ function rowToCourse(row: QueryRow, index: number): Course {
     timeText,
     locationText,
     slots,
+    prerequisiteCourseCodes: readStringList(row, ['prereq_subject_codes']),
+    prerequisiteCourseNames: readStringList(row, ['prereq_subject_names']),
     details: readDetails(row),
   }
 }
@@ -269,8 +262,24 @@ function mergeCourses(existing: Course, next: Course): Course {
     timeText: timeParts.length > 0 ? timeParts.join(', ') : existing.timeText,
     locationText: mergeTextList(existing.locationText, next.locationText),
     slots: mergedSlots,
+    prerequisiteCourseCodes: mergeStringArrays(
+      existing.prerequisiteCourseCodes,
+      next.prerequisiteCourseCodes,
+    ),
+    prerequisiteCourseNames: mergeStringArrays(
+      existing.prerequisiteCourseNames,
+      next.prerequisiteCourseNames,
+    ),
     details: [...(existing.details ?? []), ...(next.details ?? [])],
   }
+}
+
+function mergeStringArrays(existing?: string[], next?: string[]) {
+  const merged = [...(existing ?? [])]
+  for (const item of next ?? []) {
+    if (!merged.includes(item)) merged.push(item)
+  }
+  return merged
 }
 
 function mergeTextList(existing?: string, next?: string) {
@@ -296,6 +305,7 @@ export default function ChatPopup({
   onClose,
   selectedCourses,
   selectedIds,
+  completedCourseCodes,
   onAddCourse,
   onRemoveCourse,
   onReplaceCourse,
@@ -305,6 +315,7 @@ export default function ChatPopup({
   onClose: () => void
   selectedCourses: Course[]
   selectedIds: Set<string>
+  completedCourseCodes: Set<string> | null
   onAddCourse: (course: Course) => void
   onRemoveCourse: (courseId: string) => void
   onReplaceCourse: (course: Course) => void
@@ -608,6 +619,7 @@ export default function ChatPopup({
                   const already = selectedIds.has(c.id)
                   const hasConflict = getConflictingCourseIds(c, selectedCourses).size > 0
                   const closed = c.status === 'Closed'
+                  const unmetPrerequisite = hasUnmetPrerequisite(c, completedCourseCodes)
                   return (
                     <div
                       key={c.id}
@@ -626,6 +638,7 @@ export default function ChatPopup({
                                 hasConflict,
                                 closed,
                               }),
+                              unmetPrerequisite && !already && 'text-violet-700',
                             )}
                           >
                             {c.departmentName}
@@ -638,6 +651,11 @@ export default function ChatPopup({
                           {c.professor} · {c.timeText}
                           {c.locationText ? ` · Location: ${c.locationText}` : ''}
                         </div>
+                        {unmetPrerequisite ? (
+                          <div className="mt-1 inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                            Prerequisite warning
+                          </div>
+                        ) : null}
                       </div>
                       <button
                         type="button"
@@ -657,6 +675,10 @@ export default function ChatPopup({
                           'h-9 shrink-0 rounded-lg px-3 text-xs font-semibold transition',
                           already
                             ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800'
+                            : closed
+                              ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            : unmetPrerequisite
+                              ? 'bg-violet-50 text-violet-700 hover:bg-violet-100'
                             : hasConflict
                               ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                               : 'bg-blue-50 text-blue-700 hover:bg-blue-100',

@@ -152,6 +152,17 @@ def _compact_value(value) -> str:
     return "" if text.lower() == "null" else text
 
 
+def _split_course_list(value) -> list[str]:
+    text = _compact_value(value)
+    if not text or text in {"없음", "None", "none", "-"}:
+        return []
+    return [
+        part.strip()
+        for part in re.split(r"[,;/\n]+", text)
+        if part.strip() and part.strip() not in {"없음", "None", "none", "-"}
+    ]
+
+
 def _display_time(value: str) -> str:
     match = re.match(r"^([0-2]?\d):([0-5]\d)(?::[0-5]\d)?$", value)
     if not match:
@@ -214,7 +225,7 @@ def _schedule_from_row(row: dict, lecture_time: str) -> list[dict]:
 
 
 def _lecture_time_from_row(row: dict) -> str:
-    lecture_time = _compact_value(row.get("lecture_time"))
+    lecture_time = _compact_value(row.get("lecture_time") or row.get("table_schedule"))
     if lecture_time:
         return lecture_time
 
@@ -251,7 +262,10 @@ def _course_detail_items(row: dict) -> list[dict]:
         ("day_of_week", "요일"),
         ("start_time", "시작"),
         ("end_time", "종료"),
+        ("table_schedule", "시간표"),
         ("classroom", "강의실"),
+        ("prereq_subject_codes", "선수과목 코드"),
+        ("prereq_subject_names", "선수과목명"),
     ]
     details = []
     for key, label in labels:
@@ -283,6 +297,13 @@ def _merge_course_item(existing: dict, item: dict) -> dict:
         if location not in existing_locations:
             existing_locations.append(location)
     existing["locationText"] = ", ".join(existing_locations)
+
+    for key in ("prerequisiteCourseCodes", "prerequisiteCourseNames"):
+        existing_values = existing.get(key, [])
+        for value in item.get(key, []):
+            if value not in existing_values:
+                existing_values.append(value)
+        existing[key] = existing_values
 
     seen_details = {
         (detail.get("label"), detail.get("value"))
@@ -336,6 +357,8 @@ def _to_course_item(row: dict):
         "locationText": location,
         "section": str(section),
         "tags": tags,
+        "prerequisiteCourseCodes": _split_course_list(row.get("prereq_subject_codes")),
+        "prerequisiteCourseNames": _split_course_list(row.get("prereq_subject_names")),
         "details": _course_detail_items(row),
     }
 
@@ -404,11 +427,24 @@ def get_my_profile(authorization: str | None = Header(default=None)):
 def list_courses(
     page: int = 1,
     pageSize: int = 100,
+    keyword: str | None = None,
 ):
     page = max(page, 1)
     pageSize = min(max(pageSize, 1), 200)
     offset = (page - 1) * pageSize
-    row_limit = pageSize * 4
+    filters = []
+    normalized_keyword = (keyword or "").strip()
+    if normalized_keyword:
+        escaped_keyword = (
+            normalized_keyword
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+            .replace("'", "''")
+        )
+        filters.append(f"subject_name ILIKE '%{escaped_keyword}%' ESCAPE '\\'")
+
+    where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     sql = f"""
         SELECT
             course_year,
@@ -425,13 +461,14 @@ def list_courses(
             eval_type,
             class_mode,
             dept_name,
-            day_of_week,
-            start_time,
-            end_time,
-            classroom
+            table_schedule,
+            classroom,
+            prereq_subject_codes,
+            prereq_subject_names
         FROM v_course_info
-        ORDER BY subject_code, section, day_of_week, start_time
-        LIMIT {row_limit} OFFSET {offset}
+        {where_clause}
+        ORDER BY subject_code, section
+        LIMIT {pageSize} OFFSET {offset}
     """
 
     try:
