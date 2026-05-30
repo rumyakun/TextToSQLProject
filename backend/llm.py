@@ -101,14 +101,13 @@ Relevant schema:
 {relevant}
 
 Full schema:
-v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom)
+v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, table_schedule, classroom)
 
 Column details:
 - course_year: integer (1, 2, 3, 4). Use exact match: course_year = 1.
 - credit_hours: string (e.g., '3', '2'). ALWAYS use strings: credit_hours = '3'.
-- day_of_week: string containing Korean days (e.g., '월', '목'). Do NOT use integers.
+- table_schedule: string containing schedules (e.g., '월 15:00 ~ 17:00, 목 11:00 ~ 13:00'). ALWAYS use LIKE for filtering day or time. Examples: `table_schedule LIKE '%월%'` (Monday). For '오전' (morning), use `(table_schedule LIKE '%09:%' OR table_schedule LIKE '%10:%' OR table_schedule LIKE '%11:%')`. For '오후' (afternoon), use `(table_schedule LIKE '%12:%' OR table_schedule LIKE '%13:%' OR table_schedule LIKE '%14:%' OR table_schedule LIKE '%15:%' OR table_schedule LIKE '%16:%' OR table_schedule LIKE '%17:%')`.
 - category: Course category (e.g., '전공(기초)', '전공(핵심)', '교양(필수)'). Use LIKE for partial matches: category LIKE '%전공(기초)%' or category LIKE '%전공%'.
-- start_time: Course start time. For '오전' (morning), use start_time < '12:00'. For '오후' (afternoon), use start_time >= '12:00'.
 - class_mode: Do NOT use this column unless the user explicitly asks for online/offline/real-time classes.
 
 Rules:
