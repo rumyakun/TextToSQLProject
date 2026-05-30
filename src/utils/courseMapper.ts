@@ -1,5 +1,10 @@
 import type { CourseItemApi, WeekdayApi } from '../types/api'
 import type { Course, Weekday } from '../types/course'
+import {
+  normalizeCourseDay,
+  parseCourseClockHour,
+  parseCourseSlotsFromText,
+} from './courseSchedule'
 
 const weekdayMap: Record<WeekdayApi, Weekday | null> = {
   MON: 'Mon',
@@ -12,18 +17,14 @@ const weekdayMap: Record<WeekdayApi, Weekday | null> = {
 }
 
 function parseClockHour(value: string) {
-  const match = value.match(/(\d{1,2})(?::([0-5]\d))?/)
-  if (!match) return null
-  const hour = Number(match[1])
-  const minute = Number(match[2] ?? '0')
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
-  return hour + minute / 60
+  return parseCourseClockHour(value)
 }
 
 function apiStatus(course: CourseItemApi): Course['status'] {
   if (
     typeof course.capacity === 'number' &&
     typeof course.enrolled === 'number' &&
+    course.capacity > 0 &&
     course.enrolled >= course.capacity
   ) {
     return 'Closed'
@@ -34,7 +35,7 @@ function apiStatus(course: CourseItemApi): Course['status'] {
 export function apiCourseToCourse(course: CourseItemApi): Course {
   const slots = course.schedule
     .map((slot) => {
-      const day = weekdayMap[slot.day]
+      const day = weekdayMap[slot.day] ?? normalizeCourseDay(String(slot.day))
       const startHour = parseClockHour(slot.start)
       const endHour = parseClockHour(slot.end)
       if (!day || startHour === null || endHour === null || endHour <= startHour) {
@@ -50,6 +51,7 @@ export function apiCourseToCourse(course: CourseItemApi): Course {
       .map((slot) => `${slot.day} ${slot.start}-${slot.end}`)
       .join(', ') ||
     'Time TBA'
+  const parsedSlots = slots.length > 0 ? slots : parseCourseSlotsFromText(timeText)
 
   return {
     id: course.courseId,
@@ -62,7 +64,9 @@ export function apiCourseToCourse(course: CourseItemApi): Course {
     enrolled: course.enrolled,
     timeText,
     locationText: course.locationText,
-    slots,
+    slots: parsedSlots,
+    prerequisiteCourseCodes: course.prerequisiteCourseCodes,
+    prerequisiteCourseNames: course.prerequisiteCourseNames,
     details: course.details,
   }
 }

@@ -1,5 +1,6 @@
 import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
+import { hasUnmetPrerequisite } from '../utils/prerequisites'
 import { getConflictingCourseIds } from '../utils/schedule'
 
 const statusStyles: Record<Course['status'], string> = {
@@ -27,6 +28,7 @@ export default function CourseTable({
   courses,
   selectedIds,
   selectedCourses,
+  completedCourseCodes,
   onAddCourse,
   onRemoveCourse,
   onHoverCourse,
@@ -35,6 +37,7 @@ export default function CourseTable({
   courses: Course[]
   selectedIds: Set<string>
   selectedCourses: Course[]
+  completedCourseCodes: Set<string> | null
   onAddCourse: (course: Course) => void
   onRemoveCourse: (courseId: string) => void
   onHoverCourse: (course: Course | null) => void
@@ -75,6 +78,7 @@ export default function CourseTable({
               const selected = selectedIds.has(c.id)
               const hasConflict = getConflictingCourseIds(c, selectedCourses).size > 0
               const closed = c.status === 'Closed'
+              const unmetPrerequisite = hasUnmetPrerequisite(c, completedCourseCodes)
               return (
                 <tr
                   key={c.id}
@@ -83,6 +87,7 @@ export default function CourseTable({
                   className={cn(
                     'hover:bg-slate-50/70',
                     selected && 'bg-blue-50/40',
+                    unmetPrerequisite && !selected && 'bg-violet-50/40',
                     hasConflict && !selected && 'bg-amber-50/40',
                   )}
                 >
@@ -105,6 +110,10 @@ export default function CourseTable({
                         'h-8 rounded-lg px-3 text-xs font-semibold transition',
                         selected
                           ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800'
+                          : closed
+                            ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          : unmetPrerequisite
+                            ? 'bg-violet-50 text-violet-700 hover:bg-violet-100'
                           : hasConflict
                             ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
                             : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
@@ -121,7 +130,9 @@ export default function CourseTable({
                           <div
                             className={cn(
                               'mb-1 truncate text-[11px] font-semibold',
-                              departmentColor({ selected, hasConflict, closed }),
+                              unmetPrerequisite && !selected
+                                ? 'text-violet-700'
+                                : departmentColor({ selected, hasConflict, closed }),
                             )}
                           >
                             {c.departmentName}
@@ -131,6 +142,18 @@ export default function CourseTable({
                           {c.name}
                         </div>
                         <div className="text-xs text-slate-500">{c.id}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {closed ? (
+                            <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
+                              Capacity warning
+                            </span>
+                          ) : null}
+                          {unmetPrerequisite ? (
+                            <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
+                              Prerequisite warning
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </td>

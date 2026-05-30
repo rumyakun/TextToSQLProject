@@ -43,6 +43,7 @@ function sanitizeUser(user: StoredUser): AuthUser {
     studentNo: user.studentNo,
     departmentCode: user.departmentCode,
     departmentName: user.departmentName,
+    completedCourses: user.completedCourses,
   }
 }
 

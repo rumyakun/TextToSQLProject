@@ -7,6 +7,7 @@ function toAuthUser(user: {
   studentNo: string
   departmentCode?: string
   departmentName?: string
+  completedCourses?: unknown[]
 }): AuthUser {
   return {
     id: user.id,
@@ -14,6 +15,7 @@ function toAuthUser(user: {
     studentNo: user.studentNo,
     departmentCode: user.departmentCode,
     departmentName: user.departmentName,
+    completedCourses: user.completedCourses,
   }
 }
 
