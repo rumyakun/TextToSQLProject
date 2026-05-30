@@ -29,6 +29,7 @@ export type UserProfile = {
   majorType?: 'MAIN' | 'DOUBLE' | 'MINOR'
   admissionYear?: number
   requirementVersion?: string
+  completedCourses?: unknown[]
 }
 
 export type LoginRequest = {
@@ -84,6 +85,8 @@ export type CourseItemApi = {
   locationText?: string
   section?: string
   tags?: string[]
+  prerequisiteCourseCodes?: string[]
+  prerequisiteCourseNames?: string[]
   details?: CourseDetailApi[]
 }
 

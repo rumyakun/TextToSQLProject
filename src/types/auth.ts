@@ -4,6 +4,7 @@ export type AuthUser = {
   name: string
   departmentCode?: string
   departmentName?: string
+  completedCourses?: unknown[]
 }
 
 export type AuthResult = {
