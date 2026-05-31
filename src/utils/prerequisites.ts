@@ -53,7 +53,8 @@ export function getUnmetPrerequisiteCodes(
   if (!completedCourseCodes) return []
 
   return (course.prerequisiteCourseCodes ?? []).filter(
-    (code) => !completedCourseCodes.has(normalizeCourseCode(code)),
+    (code) =>
+      !courseCodeVariants(code).some((variant) => completedCourseCodes.has(variant)),
   )
 }
 

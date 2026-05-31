@@ -84,8 +84,25 @@ def _to_user_profile(row: dict) -> dict:
         "departmentCode": str(department_code or ""),
         "departmentName": str(department_name or ""),
         "grade": row.get("grade") or 0,
-        "completedCourses": [],
+        "completedCourses": _completed_courses_for_student(student_id),
     }
+
+
+def _completed_courses_for_student(student_id: str) -> list[dict]:
+    rows = run_query(
+        """
+        SELECT DISTINCT subject_code
+        FROM enrollment
+        WHERE student_id = %s
+          AND subject_code IS NOT NULL
+        """,
+        (student_id,),
+    )
+    return [
+        {"subject_code": str(row["subject_code"])}
+        for row in rows
+        if row.get("subject_code") is not None
+    ]
 
 
 def _find_student_by_id(student_id: str) -> dict | None:

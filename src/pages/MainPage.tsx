@@ -135,8 +135,8 @@ export default function MainPage({
     [hoveredCourse, selectedCourses],
   )
   const completedCourseCodes = useMemo(
-    () => extractCompletedCourseCodes(completedCourses),
-    [completedCourses],
+    () => (userStudentNo ? extractCompletedCourseCodes(completedCourses) : null),
+    [completedCourses, userStudentNo],
   )
 
   function addCourseDirect(course: Course) {
