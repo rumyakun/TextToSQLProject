@@ -88,7 +88,7 @@ def has_scoped_student_filter(sql: str, table_aliases: set[str], requested_stude
 
     rhs_group = "|".join(allowed_rhs_patterns)
     for alias in table_aliases:
-        pattern = rf"\b{re.escape(alias)}\.student_id\s*=\s*(?:{rhs_group})\b"
+        pattern = rf"\b{re.escape(alias)}\.student_id\s*=\s*(?:{rhs_group})(?![a-z0-9_])"
         if re.search(pattern, sql):
             return True
     return False

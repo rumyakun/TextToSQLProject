@@ -30,6 +30,7 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
+    excludeCompletedCourses: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -528,18 +529,27 @@ def list_courses(
     }
 
 
-def _run_query(req: QueryRequest):
+def _run_query(req: QueryRequest, authorization: str | None = None):
     try:
-        return process(req.query)
+        student_no = None
+        if req.excludeCompletedCourses:
+            student_no = _student_from_authorization(authorization)["studentNo"]
+        return process(
+            req.query,
+            exclude_completed_courses=req.excludeCompletedCourses,
+            student_id=student_no,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/v1/chat/query")
-def chat_query_api(req: QueryRequest):
-    return _run_query(req)
+def chat_query_api(req: QueryRequest, authorization: str | None = Header(default=None)):
+    return _run_query(req, authorization)
 
 
 @app.post("/api/v1/query")
-def query_api(req: QueryRequest):
-    return _run_query(req)
+def query_api(req: QueryRequest, authorization: str | None = Header(default=None)):
+    return _run_query(req, authorization)

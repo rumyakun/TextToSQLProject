@@ -18,6 +18,28 @@ def enforce_limit(sql):
     return sql
 
 
+def _strip_trailing_semicolon(sql):
+    return sql.strip().removesuffix(";").strip()
+
+
+def _sql_literal(value):
+    text = str(value)
+    return "'" + text.replace("'", "''") + "'"
+
+
+def exclude_completed_courses_sql(sql, student_id):
+    base_sql = _strip_trailing_semicolon(sql)
+    return (
+        "SELECT b.*\n"
+        f"FROM ({base_sql}) AS b\n"
+        "WHERE b.subject_code NOT IN (\n"
+        "    SELECT a.subject_code\n"
+        "    FROM enrollment AS a\n"
+        f"    WHERE a.student_id = {_sql_literal(student_id)}\n"
+        ")"
+    )
+
+
 def validate_sql(sql, requested_student_id=None):
     result = validate_generated_sql(sql, requested_student_id=requested_student_id)
     if not result["ok"]:
@@ -32,7 +54,7 @@ def _with_query_context(response, query, normalized_query, preprocessing):
     return response
 
 
-def process(query):
+def process(query, exclude_completed_courses=False, student_id=None):
     started_total = time.perf_counter()
     timings = {
         "cache_lookup_ms": 0,
@@ -49,7 +71,11 @@ def process(query):
     timings["preprocess_ms"] = int((time.perf_counter() - t_pre) * 1000)
 
     t0 = time.perf_counter()
-    cached = get_cache(normalized_query)
+    cache_key = normalized_query
+    if exclude_completed_courses:
+        cache_key = f"{normalized_query}::exclude_completed::{student_id}"
+
+    cached = get_cache(cache_key)
     timings["cache_lookup_ms"] = int((time.perf_counter() - t0) * 1000)
     if cached:
         cached["cache_hit"] = True
@@ -79,16 +105,26 @@ def process(query):
         validate_sql(sql)
         timings["validate_ms"] = int((time.perf_counter() - t_val) * 1000)
 
+        executable_sql = (
+            exclude_completed_courses_sql(sql, student_id)
+            if exclude_completed_courses
+            else sql
+        )
+        if exclude_completed_courses:
+            t_val = time.perf_counter()
+            validate_sql(executable_sql, requested_student_id=str(student_id))
+            timings["validate_ms"] += int((time.perf_counter() - t_val) * 1000)
+
         try:
             t_db = time.perf_counter()
-            result = run_query(sql)
+            result = run_query(executable_sql)
             timings["db_ms"] = int((time.perf_counter() - t_db) * 1000)
         except RuntimeError as db_err:
             if "DATABASE_URL is not set" in str(db_err):
                 timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
                 res = _with_query_context(
                     {
-                        "sql": sql,
+                        "sql": executable_sql,
                         "data": [],
                         "warning": "DATABASE_URL is not set. SQL only mode is active.",
                         "cache_hit": False,
@@ -98,15 +134,15 @@ def process(query):
                     normalized_query,
                     preprocessing,
                 )
-                set_cache(normalized_query, res)
-                log_query(normalized_query, sql, True)
+                set_cache(cache_key, res)
+                log_query(normalized_query, executable_sql, True)
                 return res
             raise
 
         timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
         res = _with_query_context(
             {
-                "sql": sql,
+                "sql": executable_sql,
                 "data": result,
                 "cache_hit": False,
                 "timings_ms": timings,
@@ -116,8 +152,8 @@ def process(query):
             preprocessing,
         )
 
-        set_cache(normalized_query, res)
-        log_query(normalized_query, sql, True)
+        set_cache(cache_key, res)
+        log_query(normalized_query, executable_sql, True)
 
         return res
 
@@ -143,16 +179,26 @@ def process(query):
             validate_sql(fixed)
             timings["validate_ms"] += int((time.perf_counter() - t_val) * 1000)
 
+            executable_fixed = (
+                exclude_completed_courses_sql(fixed, student_id)
+                if exclude_completed_courses
+                else fixed
+            )
+            if exclude_completed_courses:
+                t_val = time.perf_counter()
+                validate_sql(executable_fixed, requested_student_id=str(student_id))
+                timings["validate_ms"] += int((time.perf_counter() - t_val) * 1000)
+
             try:
                 t_db = time.perf_counter()
-                result = run_query(fixed)
+                result = run_query(executable_fixed)
                 timings["db_ms"] += int((time.perf_counter() - t_db) * 1000)
             except RuntimeError as db_err:
                 if "DATABASE_URL is not set" in str(db_err):
                     timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
                     res = _with_query_context(
                         {
-                            "sql": fixed,
+                            "sql": executable_fixed,
                             "data": [],
                             "warning": "DATABASE_URL is not set. SQL only mode is active.",
                             "cache_hit": False,
@@ -162,15 +208,15 @@ def process(query):
                         normalized_query,
                         preprocessing,
                     )
-                    set_cache(normalized_query, res)
-                    log_query(normalized_query, fixed, True)
+                    set_cache(cache_key, res)
+                    log_query(normalized_query, executable_fixed, True)
                     return res
                 raise
 
             timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
             return _with_query_context(
                 {
-                    "sql": fixed,
+                    "sql": executable_fixed,
                     "data": result,
                     "cache_hit": False,
                     "timings_ms": timings,

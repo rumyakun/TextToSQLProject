@@ -55,6 +55,7 @@ export default function App() {
 
   return (
     <MainPage
+      userStudentNo={currentUser?.studentNo}
       userName={currentUser?.name}
       completedCourses={currentUser?.completedCourses}
       onLoginClick={() => setAuthPageOpen(true)}
