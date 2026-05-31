@@ -29,10 +29,9 @@ export const remoteAuthService: AuthService = {
     }
   },
 
-  async login(studentNo, password) {
+  async login(studentNo) {
     const result = await authApi.login({
       studentNo,
-      password,
     })
     return toAuthUser(result.user)
   },

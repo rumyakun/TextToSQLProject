@@ -56,17 +56,12 @@ export const localAuthService: AuthService = {
     return found ? sanitizeUser(found) : null
   },
 
-  async login(studentNo, password) {
+  async login(studentNo) {
     const normalizedStudentNo = normalizeStudentNo(studentNo)
     const users = readUsers()
     const found = users.find((user) => user.studentNo === normalizedStudentNo)
     if (!found) {
-      throw new Error('학번 또는 비밀번호가 올바르지 않습니다.')
-    }
-
-    const hash = await sha256(password)
-    if (found.passwordHash !== hash) {
-      throw new Error('학번 또는 비밀번호가 올바르지 않습니다.')
+      throw new Error('등록되지 않은 학번입니다.')
     }
 
     localStorage.setItem(SESSION_STORAGE_KEY, normalizedStudentNo)

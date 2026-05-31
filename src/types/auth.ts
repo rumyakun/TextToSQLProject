@@ -14,7 +14,7 @@ export type AuthResult = {
 
 export type AuthService = {
   getCurrentUser: () => Promise<AuthUser | null>
-  login: (studentNo: string, password: string) => Promise<AuthUser>
+  login: (studentNo: string) => Promise<AuthUser>
   signup: (
     name: string,
     studentNo: string,

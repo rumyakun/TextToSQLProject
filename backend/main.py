@@ -7,7 +7,7 @@ import re
 
 from .keyword_extract import warmup_keyword_normalizer
 from .llm import warmup_model
-from .mock_auth import authenticate, get_student, make_access_token, verify_access_token
+from .mock_auth import make_access_token, verify_access_token
 from .process import process
 from .db import run_query
 
@@ -34,7 +34,6 @@ class QueryRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     studentNo: str = Field(min_length=1, max_length=30)
-    password: str = Field(min_length=1, max_length=200)
 
 
 class SignupRequest(BaseModel):
@@ -60,10 +59,42 @@ def _student_from_authorization(authorization: str | None):
     if not student_no:
         raise _auth_error("Invalid access token.")
 
-    student = get_student(student_no)
+    student = _find_student_by_id(student_no)
     if not student:
         raise _auth_error("Student not found.")
     return student
+
+
+def _to_user_profile(row: dict) -> dict:
+    student_id = str(row.get("student_id") or "")
+    name = (
+        row.get("name")
+        or row.get("student_name")
+        or row.get("user_name")
+        or student_id
+    )
+    department_code = row.get("department_code") or row.get("dept_code") or ""
+    department_name = row.get("department_name") or row.get("dept_name") or ""
+
+    return {
+        "id": str(row.get("id") or student_id),
+        "studentNo": student_id,
+        "name": str(name),
+        "departmentCode": str(department_code or ""),
+        "departmentName": str(department_name or ""),
+        "grade": row.get("grade") or 0,
+        "completedCourses": [],
+    }
+
+
+def _find_student_by_id(student_id: str) -> dict | None:
+    rows = run_query(
+        "SELECT * FROM student WHERE student_id = %s LIMIT 1",
+        (student_id,),
+    )
+    if not rows:
+        return None
+    return _to_user_profile(rows[0])
 
 
 DAY_ALIASES = {
@@ -384,9 +415,10 @@ def warmup_status():
 
 @app.post("/api/v1/auth/login")
 def login(req: LoginRequest):
-    student = authenticate(req.studentNo.strip(), req.password)
+    student_no = req.studentNo.strip()
+    student = _find_student_by_id(student_no)
     if not student:
-        raise _auth_error("학번 또는 비밀번호가 올바르지 않습니다.")
+        raise _auth_error("등록되지 않은 학번입니다.")
 
     return {
         "accessToken": make_access_token(student["studentNo"]),
