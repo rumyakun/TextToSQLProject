@@ -22,10 +22,10 @@ services:
     ports:
       - '8000:8000'
     environment:
-      OLLAMA_BASE_URL: http://168.188.128.36:20301
+      OLLAMA_BASE_URL: 
       OLLAMA_MODEL: text2sql-local
       OLLAMA_KEEP_ALIVE: 10m
-      DATABASE_URL: postgresql://postgres:rbgur123@host.docker.internal:5432/postgres
+      DATABASE_URL: 
       REDIS_URL: redis://redis:6379/0
       QUERY_LOG_PATH: /app/backend-log.txt
     extra_hosts:
