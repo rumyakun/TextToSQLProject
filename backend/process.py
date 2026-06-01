@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 
 from .db import run_query
@@ -28,17 +29,53 @@ def _sql_literal(value):
     return "'" + text.replace("'", "''") + "'"
 
 
+def _find_v_course_info_alias(sql):
+    match = re.search(
+        r"\b(?:from|join)\s+v_course_info(?:\s+as)?\s+([a-z_][a-z0-9_]*)\b",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(1)
+
+    if re.search(r"\b(?:from|join)\s+v_course_info\b", sql, flags=re.IGNORECASE):
+        return "v_course_info"
+
+    return None
+
+
+def _insert_before_query_suffix(sql, clause):
+    suffix_match = re.search(
+        r"\s+\b(group\s+by|having|order\s+by|limit|offset)\b",
+        sql,
+        flags=re.IGNORECASE,
+    )
+    if not suffix_match:
+        return f"{sql}\n{clause}"
+
+    index = suffix_match.start()
+    return f"{sql[:index]}\n{clause}{sql[index:]}"
+
+
 def exclude_completed_courses_sql(sql, student_id):
     base_sql = _strip_trailing_semicolon(sql)
-    return (
-        "SELECT b.*\n"
-        f"FROM ({base_sql}) AS b\n"
-        "WHERE b.subject_code NOT IN (\n"
-        "    SELECT a.subject_code\n"
+    course_alias = _find_v_course_info_alias(base_sql)
+    if not course_alias:
+        raise Exception("v_course_info is required to exclude completed courses")
+
+    predicate = (
+        "NOT EXISTS (\n"
+        "    SELECT 1\n"
         "    FROM enrollment AS a\n"
         f"    WHERE a.student_id = {_sql_literal(student_id)}\n"
+        f"      AND a.subject_code = {course_alias}.subject_code\n"
         ")"
     )
+
+    if re.search(r"\bwhere\b", base_sql, flags=re.IGNORECASE):
+        return _insert_before_query_suffix(base_sql, f"AND {predicate}")
+
+    return _insert_before_query_suffix(base_sql, f"WHERE {predicate}")
 
 
 def validate_sql(sql, requested_student_id=None, query=None):
