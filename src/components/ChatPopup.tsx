@@ -51,6 +51,18 @@ function makeId(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`
 }
 
+function LoadingSpinner({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-r-transparent',
+        className,
+      )}
+      aria-hidden="true"
+    />
+  )
+}
+
 function isQueryRow(value: unknown): value is QueryRow {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -341,6 +353,7 @@ export default function ChatPopup({
   const [dbCourses, setDbCourses] = useState<Course[] | null>(null)
   const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
   const [excludeCompletedCourses, setExcludeCompletedCourses] = useState(false)
+  const [guidelineOpen, setGuidelineOpen] = useState(true)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -584,6 +597,16 @@ export default function ChatPopup({
               />
               수강 이력 존재 과목 제외
             </label>
+            {loading ? (
+              <div
+                className="mb-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700"
+                role="status"
+                aria-live="polite"
+              >
+                <LoadingSpinner className="h-3.5 w-3.5" />
+                답변을 생성하고 있습니다...
+              </div>
+            ) : null}
             <div className="flex items-center gap-2">
               <input
                 value={input}
@@ -602,11 +625,32 @@ export default function ChatPopup({
                   'h-10 shrink-0 rounded-xl px-4 text-sm font-semibold text-white shadow-sm transition',
                   loading
                     ? 'bg-rose-600 hover:bg-rose-700 active:bg-rose-700'
-                    : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-700',
+                      : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-700',
                 )}
               >
-                {loading ? 'Cancel' : 'Send'}
+                <span className="inline-flex items-center gap-2">
+                  {loading ? <LoadingSpinner /> : null}
+                  {loading ? 'Cancel' : 'Send'}
+                </span>
               </button>
+            </div>
+            <div className="mt-2 rounded-lg border border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => setGuidelineOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                aria-expanded={guidelineOpen}
+              >
+                <span>질문 작성 가이드</span>
+                <span className="text-slate-400">
+                  {guidelineOpen ? '접기' : '펼치기'}
+                </span>
+              </button>
+              {guidelineOpen ? (
+                <div className="border-t border-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">
+                  원하는 강의 조건을 과목명, 학과, 요일, 시간, 이수구분처럼 구체적으로 적으면 더 정확한 결과를 볼 수 있습니다.
+                </div>
+              ) : null}
             </div>
             {lastWarning && (
               <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

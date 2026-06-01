@@ -11,7 +11,7 @@ from .validate import validate_generated_sql
 
 
 logger = logging.getLogger("uvicorn.error")
-SQL_GENERATION_CACHE_VERSION = "course-schedule-v3"
+SQL_GENERATION_CACHE_VERSION = "course-schedule-v4"
 
 
 def enforce_limit(sql):
