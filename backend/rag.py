@@ -1,4 +1,5 @@
 schema_docs = [
+    "course_schedule: course schedule table with day_of_week, start_time, end_time, classroom. Always join with v_course_info using subject_code and section for course queries.",
     "v_course_info: 통합된 강의 개설, 시간, 학과, 교수, 과목 상세 정보",
     "course_prerequisite: 선수과목",
     "enrollment: 수강 정보",

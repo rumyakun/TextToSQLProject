@@ -7,7 +7,7 @@ import re
 
 from .keyword_extract import warmup_keyword_normalizer
 from .llm import warmup_model
-from .mock_auth import authenticate, get_student, make_access_token, verify_access_token
+from .mock_auth import make_access_token, verify_access_token
 from .process import process
 from .db import run_query
 
@@ -30,11 +30,11 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
+    excludeCompletedCourses: bool = False
 
 
 class LoginRequest(BaseModel):
     studentNo: str = Field(min_length=1, max_length=30)
-    password: str = Field(min_length=1, max_length=200)
 
 
 class SignupRequest(BaseModel):
@@ -60,10 +60,59 @@ def _student_from_authorization(authorization: str | None):
     if not student_no:
         raise _auth_error("Invalid access token.")
 
-    student = get_student(student_no)
+    student = _find_student_by_id(student_no)
     if not student:
         raise _auth_error("Student not found.")
     return student
+
+
+def _to_user_profile(row: dict) -> dict:
+    student_id = str(row.get("student_id") or "")
+    name = (
+        row.get("name")
+        or row.get("student_name")
+        or row.get("user_name")
+        or student_id
+    )
+    department_code = row.get("department_code") or row.get("dept_code") or ""
+    department_name = row.get("department_name") or row.get("dept_name") or ""
+
+    return {
+        "id": str(row.get("id") or student_id),
+        "studentNo": student_id,
+        "name": str(name),
+        "departmentCode": str(department_code or ""),
+        "departmentName": str(department_name or ""),
+        "grade": row.get("grade") or 0,
+        "completedCourses": _completed_courses_for_student(student_id),
+    }
+
+
+def _completed_courses_for_student(student_id: str) -> list[dict]:
+    rows = run_query(
+        """
+        SELECT DISTINCT subject_code
+        FROM enrollment
+        WHERE student_id = %s
+          AND subject_code IS NOT NULL
+        """,
+        (student_id,),
+    )
+    return [
+        {"subject_code": str(row["subject_code"])}
+        for row in rows
+        if row.get("subject_code") is not None
+    ]
+
+
+def _find_student_by_id(student_id: str) -> dict | None:
+    rows = run_query(
+        "SELECT * FROM student WHERE student_id = %s LIMIT 1",
+        (student_id,),
+    )
+    if not rows:
+        return None
+    return _to_user_profile(rows[0])
 
 
 DAY_ALIASES = {
@@ -384,9 +433,10 @@ def warmup_status():
 
 @app.post("/api/v1/auth/login")
 def login(req: LoginRequest):
-    student = authenticate(req.studentNo.strip(), req.password)
+    student_no = req.studentNo.strip()
+    student = _find_student_by_id(student_no)
     if not student:
-        raise _auth_error("학번 또는 비밀번호가 올바르지 않습니다.")
+        raise _auth_error("등록되지 않은 학번입니다.")
 
     return {
         "accessToken": make_access_token(student["studentNo"]),
@@ -496,18 +546,27 @@ def list_courses(
     }
 
 
-def _run_query(req: QueryRequest):
+def _run_query(req: QueryRequest, authorization: str | None = None):
     try:
-        return process(req.query)
+        student_no = None
+        if req.excludeCompletedCourses:
+            student_no = _student_from_authorization(authorization)["studentNo"]
+        return process(
+            req.query,
+            exclude_completed_courses=req.excludeCompletedCourses,
+            student_id=student_no,
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/v1/chat/query")
-def chat_query_api(req: QueryRequest):
-    return _run_query(req)
+def chat_query_api(req: QueryRequest, authorization: str | None = Header(default=None)):
+    return _run_query(req, authorization)
 
 
 @app.post("/api/v1/query")
-def query_api(req: QueryRequest):
-    return _run_query(req)
+def query_api(req: QueryRequest, authorization: str | None = Header(default=None)):
+    return _run_query(req, authorization)

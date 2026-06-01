@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { getAccessToken } from '../services/apiClient'
 import type { Course, CourseDetail } from '../types/course'
 import { cn } from '../utils/cn'
 import {
@@ -303,6 +304,7 @@ function rowsToCourses(rows: unknown[]) {
 export default function ChatPopup({
   open,
   onClose,
+  userStudentNo,
   selectedCourses,
   selectedIds,
   completedCourseCodes,
@@ -313,6 +315,7 @@ export default function ChatPopup({
 }: {
   open: boolean
   onClose: () => void
+  userStudentNo?: string
   selectedCourses: Course[]
   selectedIds: Set<string>
   completedCourseCodes: Set<string> | null
@@ -337,6 +340,7 @@ export default function ChatPopup({
   const [lastError, setLastError] = useState('')
   const [dbCourses, setDbCourses] = useState<Course[] | null>(null)
   const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
+  const [excludeCompletedCourses, setExcludeCompletedCourses] = useState(false)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -407,6 +411,11 @@ export default function ChatPopup({
     setLastWarning('')
     setDbCourses(null)
 
+    if (excludeCompletedCourses && !userStudentNo) {
+      setLastError('수강 이력 과목 제외는 로그인 후 사용할 수 있습니다.')
+      return
+    }
+
     setMessages((prev) => [
       ...prev,
       { id: makeId('usr'), role: 'user', text },
@@ -417,10 +426,17 @@ export default function ChatPopup({
     abortRef.current = controller
 
     try {
+      const token = getAccessToken()
       const res = await fetch('/api/v1/chat/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: text }),
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          query: text,
+          excludeCompletedCourses,
+        }),
         signal: controller.signal,
       })
       const payload = (await res.json()) as QueryApiResponse
@@ -558,6 +574,16 @@ export default function ChatPopup({
           </div>
 
           <div className="px-4 py-3">
+            <label className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={excludeCompletedCourses}
+                onChange={(event) => setExcludeCompletedCourses(event.target.checked)}
+                disabled={loading}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              수강 이력 존재 과목 제외
+            </label>
             <div className="flex items-center gap-2">
               <input
                 value={input}

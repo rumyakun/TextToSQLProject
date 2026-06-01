@@ -88,13 +88,17 @@ def has_scoped_student_filter(sql: str, table_aliases: set[str], requested_stude
 
     rhs_group = "|".join(allowed_rhs_patterns)
     for alias in table_aliases:
-        pattern = rf"\b{re.escape(alias)}\.student_id\s*=\s*(?:{rhs_group})\b"
+        pattern = rf"\b{re.escape(alias)}\.student_id\s*=\s*(?:{rhs_group})(?![a-z0-9_])"
         if re.search(pattern, sql):
             return True
     return False
 
 
-def validate_generated_sql(sql: str, requested_student_id: str | None = None) -> ValidationResult:
+def validate_generated_sql(
+    sql: str,
+    requested_student_id: str | None = None,
+    query: str | None = None,
+) -> ValidationResult:
     normalized = sql.strip().lower()
     sql_without_trailing_semicolon = normalized[:-1].rstrip() if normalized.endswith(";") else normalized
 
@@ -117,6 +121,12 @@ def validate_generated_sql(sql: str, requested_student_id: str | None = None) ->
         return {
             "ok": False,
             "reason": f"허용되지 않은 테이블 참조: {', '.join(sorted(disallowed_tables))}",
+        }
+
+    if "v_course_info" in table_references and "course_schedule" not in table_references:
+        return {
+            "ok": False,
+            "reason": "Queries using v_course_info must also JOIN course_schedule using subject_code and section.",
         }
 
     if "student" in table_references:

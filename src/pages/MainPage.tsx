@@ -42,6 +42,7 @@ function ChatIcon({ className }: { className?: string }) {
 }
 
 type MainPageProps = {
+  userStudentNo?: string
   userName?: string
   completedCourses?: unknown[]
   onLoginClick: () => void
@@ -72,6 +73,7 @@ function buildCoursePrompt(
 }
 
 export default function MainPage({
+  userStudentNo,
   userName,
   completedCourses,
   onLoginClick,
@@ -133,8 +135,8 @@ export default function MainPage({
     [hoveredCourse, selectedCourses],
   )
   const completedCourseCodes = useMemo(
-    () => extractCompletedCourseCodes(completedCourses),
-    [completedCourses],
+    () => (userStudentNo ? extractCompletedCourseCodes(completedCourses) : null),
+    [completedCourses, userStudentNo],
   )
 
   function addCourseDirect(course: Course) {
@@ -421,6 +423,7 @@ export default function MainPage({
       <ChatPopup
         open={popupOpen}
         onClose={() => setPopupOpen(false)}
+        userStudentNo={userStudentNo}
         selectedCourses={selectedCourses}
         selectedIds={selectedIds}
         completedCourseCodes={completedCourseCodes}

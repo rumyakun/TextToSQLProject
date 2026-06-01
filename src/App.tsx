@@ -25,9 +25,9 @@ export default function App() {
     }
   }, [])
 
-  async function handleLogin(studentNo: string, password: string) {
+  async function handleLogin(studentNo: string) {
     try {
-      const user = await authService.login(studentNo, password)
+      const user = await authService.login(studentNo)
       setCurrentUser(user)
       setAuthPageOpen(false)
       return null
@@ -36,30 +36,6 @@ export default function App() {
         return error.message
       }
       return 'Login failed.'
-    }
-  }
-
-  async function handleSignup(
-    name: string,
-    studentNo: string,
-    password: string,
-    departmentCode: string,
-  ) {
-    try {
-      const user = await authService.signup(
-        name,
-        studentNo,
-        password,
-        departmentCode,
-      )
-      setCurrentUser(user)
-      setAuthPageOpen(false)
-      return null
-    } catch (error) {
-      if (error instanceof Error) {
-        return error.message
-      }
-      return 'Sign up failed.'
     }
   }
 
@@ -72,7 +48,6 @@ export default function App() {
     return (
       <AuthPage
         onLogin={handleLogin}
-        onSignup={handleSignup}
         onBack={() => setAuthPageOpen(false)}
       />
     )
@@ -80,6 +55,7 @@ export default function App() {
 
   return (
     <MainPage
+      userStudentNo={currentUser?.studentNo}
       userName={currentUser?.name}
       completedCourses={currentUser?.completedCourses}
       onLoginClick={() => setAuthPageOpen(true)}

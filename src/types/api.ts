@@ -34,7 +34,6 @@ export type UserProfile = {
 
 export type LoginRequest = {
   studentNo: string
-  password: string
 }
 
 export type SignupRequest = {

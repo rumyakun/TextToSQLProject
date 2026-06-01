@@ -10,14 +10,21 @@ Relevant schema:
 {relevant}
 
 Full schema:
-v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, lecture_time, classroom)
+- v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name)
+- course_schedule(subject_code, section, day_of_week, start_time, end_time, classroom, schedule_id)
 
 Column details:
+1. v_course_info
 - course_year: integer (1, 2, 3, 4). Use exact match: course_year = 1.
 - credit_hours: string (e.g., '3', '2'). ALWAYS use strings: credit_hours = '3'.
-- table_schedule: string containing schedules (e.g., '월 15:00 ~ 17:00, 목 11:00 ~ 13:00'). ALWAYS use LIKE for filtering day or time. Examples: `table_schedule LIKE '%월%'` (Monday). For '오전' (morning), use `(table_schedule LIKE '%09:%' OR table_schedule LIKE '%10:%' OR table_schedule LIKE '%11:%')`. For '오후' (afternoon), use `(table_schedule LIKE '%12:%' OR table_schedule LIKE '%13:%' OR table_schedule LIKE '%14:%' OR table_schedule LIKE '%15:%' OR table_schedule LIKE '%16:%' OR table_schedule LIKE '%17:%')`.
 - category: Course category (e.g., '전공(기초)', '전공(핵심)', '교양(필수)'). Use LIKE for partial matches: category LIKE '%전공(기초)%' or category LIKE '%전공%'.
 - class_mode: Do NOT use this column unless the user explicitly asks for online/offline/real-time classes.
+
+2. course_schedule
+- day_of_week: day of week information in Korean (e.g., '월', '화', '수', '목', '금').
+- start_time: class start time stored in 24-hour format (e.g., '15:00:00').
+- end_time: class end time stored in 24-hour format (e.g., '16:15:00').
+- Always join this table with v_course_info using subject_code and section.
 
 
 
@@ -25,6 +32,9 @@ Rules:
 - ONLY SELECT
 - USE ONLY the tables and columns listed in the schema above.
 - DO NOT invent or guess table names (e.g., never use 'courses', use 'v_course_info' instead).
+- ALWAYS query course data using v_course_info joined with course_schedule.
+- Use this join pattern: FROM v_course_info AS c JOIN course_schedule AS cs ON c.subject_code = cs.subject_code AND c.section = cs.section
+- Since times are stored in 24-hour format, map user queries between 1 and 7 o'clock to 13:00:00 through 19:00:00 unless the user explicitly says AM/morning.
 - ALWAYS include all category information mentioned by the user (e.g., '전공', '교양', '전공(핵심)') in the category filter.
 - For string comparisons (like dept_name, subject_name, category), ALWAYS use LIKE '%word%' instead of exact match '='.
 - DO NOT add filters for numeric columns (like credit_hours, course_year) unless the user explicitly mentions a value.
