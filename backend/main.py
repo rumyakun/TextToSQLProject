@@ -107,7 +107,17 @@ def _completed_courses_for_student(student_id: str) -> list[dict]:
 
 def _find_student_by_id(student_id: str) -> dict | None:
     rows = run_query(
-        "SELECT * FROM student WHERE student_id = %s LIMIT 1",
+        """
+        SELECT
+            s.student_id,
+            s.dept_code,
+            d.dept_name,
+            s.grade
+        FROM student AS s
+        LEFT JOIN department AS d ON s.dept_code = d.dept_code
+        WHERE s.student_id = %s
+        LIMIT 1
+        """,
         (student_id,),
     )
     if not rows:
@@ -483,46 +493,69 @@ def list_courses(
     pageSize = min(max(pageSize, 1), 200)
     offset = (page - 1) * pageSize
     filters = []
+    params = []
     normalized_keyword = (keyword or "").strip()
     if normalized_keyword:
-        escaped_keyword = (
-            normalized_keyword
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-            .replace("'", "''")
-        )
-        filters.append(f"subject_name ILIKE '%{escaped_keyword}%' ESCAPE '\\'")
+        filters.append("subject_name ILIKE %s")
+        params.append(f"%{normalized_keyword}%")
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     sql = f"""
+        WITH page_courses AS (
+            SELECT
+                course_year,
+                subject_code,
+                section,
+                subject_name,
+                category,
+                credit_hours,
+                target_year,
+                professor,
+                capacity,
+                enrolled,
+                grading_method,
+                eval_type,
+                class_mode,
+                dept_name,
+                prereq_subject_codes,
+                prereq_subject_names
+            FROM v_course_info
+            {where_clause}
+            ORDER BY subject_code, section
+            LIMIT %s OFFSET %s
+        )
         SELECT
-            course_year,
-            subject_code,
-            section,
-            subject_name,
-            category,
-            credit_hours,
-            target_year,
-            professor,
-            capacity,
-            enrolled,
-            grading_method,
-            eval_type,
-            class_mode,
-            dept_name,
-            table_schedule,
-            classroom,
-            prereq_subject_codes,
-            prereq_subject_names
-        FROM v_course_info
-        {where_clause}
-        ORDER BY subject_code, section
-        LIMIT {pageSize} OFFSET {offset}
+            pc.course_year,
+            pc.subject_code,
+            pc.section,
+            pc.subject_name,
+            pc.category,
+            pc.credit_hours,
+            pc.target_year,
+            pc.professor,
+            pc.capacity,
+            pc.enrolled,
+            pc.grading_method,
+            pc.eval_type,
+            pc.class_mode,
+            pc.dept_name,
+            cs.day_of_week,
+            cs.start_time,
+            cs.end_time,
+            cs.classroom,
+            pc.prereq_subject_codes,
+            pc.prereq_subject_names
+        FROM page_courses AS pc
+        LEFT JOIN course_schedule AS cs
+          ON pc.subject_code = cs.subject_code
+         AND pc.section = cs.section
+        ORDER BY pc.subject_code, pc.section, cs.day_of_week, cs.start_time
     """
+    count_sql = f"SELECT COUNT(*) AS total FROM v_course_info {where_clause}"
 
     try:
-        rows = run_query(sql)
+        rows = run_query(sql, (*params, pageSize, offset))
+        total_rows = run_query(count_sql, tuple(params))
     except RuntimeError as e:
         if "DATABASE_URL is not set" in str(e):
             return {
@@ -537,12 +570,13 @@ def list_courses(
         raise HTTPException(status_code=500, detail=str(e))
 
     items = _group_course_items(rows)[:pageSize]
+    total = int(total_rows[0]["total"]) if total_rows else len(items) + offset
 
     return {
         "items": items,
         "page": page,
         "pageSize": pageSize,
-        "total": len(items) + offset,
+        "total": total,
     }
 
 

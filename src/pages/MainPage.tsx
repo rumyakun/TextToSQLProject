@@ -110,7 +110,7 @@ export default function MainPage({
           pageSize: 200,
         })
         const courses = result.items.map(apiCourseToCourse)
-        if (!disposed && courses.length > 0) {
+        if (!disposed) {
           setAllCourses(courses)
         }
       } catch {
@@ -135,8 +135,8 @@ export default function MainPage({
     [hoveredCourse, selectedCourses],
   )
   const completedCourseCodes = useMemo(
-    () => (userStudentNo ? extractCompletedCourseCodes(completedCourses) : null),
-    [completedCourses, userStudentNo],
+    () => extractCompletedCourseCodes(completedCourses),
+    [completedCourses],
   )
 
   function addCourseDirect(course: Course) {
