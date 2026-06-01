@@ -10,6 +10,7 @@ from .validate import validate_generated_sql
 
 
 logger = logging.getLogger("uvicorn.error")
+SQL_GENERATION_CACHE_VERSION = "course-schedule-v3"
 
 
 def enforce_limit(sql):
@@ -40,8 +41,8 @@ def exclude_completed_courses_sql(sql, student_id):
     )
 
 
-def validate_sql(sql, requested_student_id=None):
-    result = validate_generated_sql(sql, requested_student_id=requested_student_id)
+def validate_sql(sql, requested_student_id=None, query=None):
+    result = validate_generated_sql(sql, requested_student_id=requested_student_id, query=query)
     if not result["ok"]:
         raise Exception(result["reason"] or "SQL validation failed")
     return True
@@ -71,9 +72,9 @@ def process(query, exclude_completed_courses=False, student_id=None):
     timings["preprocess_ms"] = int((time.perf_counter() - t_pre) * 1000)
 
     t0 = time.perf_counter()
-    cache_key = normalized_query
+    cache_key = f"{SQL_GENERATION_CACHE_VERSION}::{normalized_query}"
     if exclude_completed_courses:
-        cache_key = f"{normalized_query}::exclude_completed::{student_id}"
+        cache_key = f"{SQL_GENERATION_CACHE_VERSION}::{normalized_query}::exclude_completed::{student_id}"
 
     cached = get_cache(cache_key)
     timings["cache_lookup_ms"] = int((time.perf_counter() - t0) * 1000)
@@ -102,7 +103,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
 
         sql = enforce_limit(sql)
         t_val = time.perf_counter()
-        validate_sql(sql)
+        validate_sql(sql, query=normalized_query)
         timings["validate_ms"] = int((time.perf_counter() - t_val) * 1000)
 
         executable_sql = (
@@ -112,7 +113,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
         )
         if exclude_completed_courses:
             t_val = time.perf_counter()
-            validate_sql(executable_sql, requested_student_id=str(student_id))
+            validate_sql(executable_sql, requested_student_id=str(student_id), query=normalized_query)
             timings["validate_ms"] += int((time.perf_counter() - t_val) * 1000)
 
         try:
@@ -176,7 +177,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
 
             fixed = enforce_limit(fixed)
             t_val = time.perf_counter()
-            validate_sql(fixed)
+            validate_sql(fixed, query=normalized_query)
             timings["validate_ms"] += int((time.perf_counter() - t_val) * 1000)
 
             executable_fixed = (
@@ -186,7 +187,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
             )
             if exclude_completed_courses:
                 t_val = time.perf_counter()
-                validate_sql(executable_fixed, requested_student_id=str(student_id))
+                validate_sql(executable_fixed, requested_student_id=str(student_id), query=normalized_query)
                 timings["validate_ms"] += int((time.perf_counter() - t_val) * 1000)
 
             try:
