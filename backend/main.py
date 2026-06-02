@@ -500,6 +500,11 @@ def list_courses(
         params.append(f"%{normalized_keyword}%")
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
+    count_sql = f"""
+        SELECT COUNT(*) AS total
+        FROM v_course_info
+        {where_clause}
+    """
     sql = f"""
         SELECT
             course_year,
@@ -516,14 +521,16 @@ def list_courses(
             eval_type,
             class_mode,
             dept_name,
-            table_schedule,
+            day_of_week,
+            start_time,
+            end_time,
             classroom,
             prereq_subject_codes,
             prereq_subject_names
         FROM v_course_info
         {where_clause}
         ORDER BY subject_code, section
-        LIMIT {pageSize} OFFSET {offset}
+        LIMIT %s OFFSET %s
     """
 
     try:
