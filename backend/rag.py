@@ -1,11 +1,11 @@
 schema_docs = [
-    "course_schedule: course schedule table with day_of_week, start_time, end_time, classroom. Always join with v_course_info using subject_code and section for course queries.",
-    "v_course_info: 통합된 강의 개설, 시간, 학과, 교수, 과목 상세 정보",
-    "course_prerequisite: 선수과목",
-    "enrollment: 수강 정보",
-    "required_subject: 이수요건",
-    "student: 학생 정보",
+    "v_course_info: integrated course information with day_of_week, start_time, end_time, classroom, and course_schedule for schedule filters. Query course data from this view only.",
+    "course_prerequisite: prerequisite course information",
+    "enrollment: student enrollment information",
+    "required_subject: graduation requirement information",
+    "student: student information",
 ]
+
 
 def _tokenize(text: str) -> set[str]:
     return {tok for tok in text.lower().replace(":", " ").replace(",", " ").split() if tok}

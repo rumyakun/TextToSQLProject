@@ -284,7 +284,7 @@ def _schedule_from_row(row: dict, lecture_time: str) -> list[dict]:
 
 
 def _lecture_time_from_row(row: dict) -> str:
-    lecture_time = _compact_value(row.get("lecture_time") or row.get("table_schedule"))
+    lecture_time = _compact_value(row.get("lecture_time") or row.get("table_schedule") or row.get("course_schedule"))
     if lecture_time:
         return lecture_time
 
@@ -501,57 +501,30 @@ def list_courses(
 
     where_clause = f"WHERE {' AND '.join(filters)}" if filters else ""
     sql = f"""
-        WITH page_courses AS (
-            SELECT
-                course_year,
-                subject_code,
-                section,
-                subject_name,
-                category,
-                credit_hours,
-                target_year,
-                professor,
-                capacity,
-                enrolled,
-                grading_method,
-                eval_type,
-                class_mode,
-                dept_name,
-                prereq_subject_codes,
-                prereq_subject_names
-            FROM v_course_info
-            {where_clause}
-            ORDER BY subject_code, section
-            LIMIT %s OFFSET %s
-        )
         SELECT
-            pc.course_year,
-            pc.subject_code,
-            pc.section,
-            pc.subject_name,
-            pc.category,
-            pc.credit_hours,
-            pc.target_year,
-            pc.professor,
-            pc.capacity,
-            pc.enrolled,
-            pc.grading_method,
-            pc.eval_type,
-            pc.class_mode,
-            pc.dept_name,
-            cs.day_of_week,
-            cs.start_time,
-            cs.end_time,
-            cs.classroom,
-            pc.prereq_subject_codes,
-            pc.prereq_subject_names
-        FROM page_courses AS pc
-        LEFT JOIN course_schedule AS cs
-          ON pc.subject_code = cs.subject_code
-         AND pc.section = cs.section
-        ORDER BY pc.subject_code, pc.section, cs.day_of_week, cs.start_time
+            course_year,
+            subject_code,
+            section,
+            subject_name,
+            category,
+            credit_hours,
+            target_year,
+            professor,
+            capacity,
+            enrolled,
+            grading_method,
+            eval_type,
+            class_mode,
+            dept_name,
+            table_schedule,
+            classroom,
+            prereq_subject_codes,
+            prereq_subject_names
+        FROM v_course_info
+        {where_clause}
+        ORDER BY subject_code, section
+        LIMIT {pageSize} OFFSET {offset}
     """
-    count_sql = f"SELECT COUNT(*) AS total FROM v_course_info {where_clause}"
 
     try:
         rows = run_query(sql, (*params, pageSize, offset))

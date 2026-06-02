@@ -22,10 +22,10 @@ services:
     ports:
       - '8000:8000'
     environment:
-      OLLAMA_BASE_URL:
+      OLLAMA_BASE_URL: 
       OLLAMA_MODEL: text2sql-local
       OLLAMA_KEEP_ALIVE: 10m
-      DATABASE_URL:
+      DATABASE_URL: 
       REDIS_URL: redis://redis:6379/0
       QUERY_LOG_PATH: /app/backend-log.txt
     extra_hosts:
