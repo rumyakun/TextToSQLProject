@@ -7,7 +7,7 @@ def run_query(sql, params=None):
     if not dsn:
         raise RuntimeError("DATABASE_URL is not set")
 
-    conn = psycopg2.connect(dsn)
+    conn = psycopg2.connect(dsn, connect_timeout=5)
 
     cur = conn.cursor()
     cur.execute(sql, params)

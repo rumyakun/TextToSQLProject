@@ -274,7 +274,7 @@ def _schedule_from_row(row: dict, lecture_time: str) -> list[dict]:
 
 
 def _lecture_time_from_row(row: dict) -> str:
-    lecture_time = _compact_value(row.get("lecture_time") or row.get("table_schedule"))
+    lecture_time = _compact_value(row.get("lecture_time") or row.get("table_schedule") or row.get("course_schedule"))
     if lecture_time:
         return lecture_time
 
@@ -511,7 +511,8 @@ def list_courses(
             eval_type,
             class_mode,
             dept_name,
-            table_schedule,
+            course_schedule,
+            course_schedule AS table_schedule,
             classroom,
             prereq_subject_codes,
             prereq_subject_names
