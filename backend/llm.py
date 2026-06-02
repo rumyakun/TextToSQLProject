@@ -101,7 +101,7 @@ Relevant schema:
 {relevant}
 
 Full schema:
-v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom)
+v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom, prereq_subject_codes, prereq_subject_names)
 
 Column details:
 - course_year: integer (1, 2, 3, 4). Use exact match: course_year = 1.
@@ -110,12 +110,16 @@ Column details:
 - category: Course category (e.g., '전공(기초)', '전공(핵심)', '교양(필수)'). Use LIKE for partial matches: category LIKE '%전공(기초)%' or category LIKE '%전공%'.
 - start_time: Course start time. For '오전' (morning), use start_time < '12:00'. For '오후' (afternoon), use start_time >= '12:00'.
 - class_mode: Do NOT use this column unless the user explicitly asks for online/offline/real-time classes.
+- prereq_subject_codes: comma-separated prerequisite subject codes. '없음' means there is no prerequisite.
+- prereq_subject_names: comma-separated prerequisite subject names. '없음' means there is no prerequisite.
 
 
 Rules:
 - ONLY SELECT
 - USE ONLY the tables and columns listed in the schema above.
 - DO NOT invent or guess table names (e.g., never use 'courses', use 'v_course_info' instead).
+- Query course data from v_course_info only. Do not join course_schedule.
+- For course search results, SELECT course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom, prereq_subject_codes, prereq_subject_names.
 - ALWAYS include all category information mentioned by the user (e.g., '전공', '교양', '전공(핵심)') in the category filter.
 - For string comparisons (like dept_name, subject_name, category), ALWAYS use LIKE '%word%' instead of exact match '='.
 - DO NOT add filters for numeric columns (like credit_hours, course_year) unless the user explicitly mentions a value.

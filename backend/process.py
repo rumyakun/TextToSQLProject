@@ -11,7 +11,7 @@ from .validate import validate_generated_sql
 
 
 logger = logging.getLogger("uvicorn.error")
-SQL_GENERATION_CACHE_VERSION = "course-schedule-v5"
+SQL_GENERATION_CACHE_VERSION = "course-view-v6"
 SQL_RESERVED_WORDS = {
     "cross",
     "full",
@@ -29,7 +29,6 @@ SQL_RESERVED_WORDS = {
 }
 SCHEDULE_FILTER_COLUMNS = {
     "classroom",
-    "course_schedule",
     "day_of_week",
     "end_time",
     "start_time",
@@ -207,8 +206,20 @@ JOIN (
     {key_sql}
 ) AS matched_courses
   ON c.subject_code = matched_courses.subject_code
- AND c.section = matched_courses.section
-ORDER BY c.subject_code, c.section, c.day_of_week, c.start_time
+ AND c.section IS NOT DISTINCT FROM matched_courses.section
+ORDER BY
+    c.subject_code,
+    c.section,
+    CASE c.day_of_week
+        WHEN '월' THEN 1
+        WHEN '화' THEN 2
+        WHEN '수' THEN 3
+        WHEN '목' THEN 4
+        WHEN '금' THEN 5
+        WHEN '토' THEN 6
+        ELSE 7
+    END,
+    c.start_time
 LIMIT {expanded_limit}
 """.strip()
 
