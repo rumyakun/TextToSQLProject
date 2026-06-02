@@ -6,3 +6,4 @@ redis
 rapidfuzz
 torch
 transformers
+sqlglot

@@ -336,8 +336,23 @@ def make_match_queries(entity_text: str, label: str) -> list[str]:
     particle_stripped = strip_korean_particle(raw)
 
     variants = [raw, particle_stripped, compact]
+    
+    # 강의/과목 등의 접미사가 붙은 경우를 제거하여 추가 변형 생성
+    if label == "CATEGORY":
+        for suffix in ["과목", "강의", "수업"]:
+            if raw.endswith(suffix) and len(raw) > len(suffix):
+                stripped = raw[:-len(suffix)].strip()
+                variants.extend([stripped, normalize_for_match(stripped)])
+
     aliases = COMMON_ALIASES.get(label, {})
-    alias_values = aliases.get(raw.lower()) or aliases.get(compact) or []
+    
+    alias_values = []
+    for variant in variants:
+        if variant in aliases:
+            alias_values.extend(aliases[variant])
+        elif variant.lower() in aliases:
+            alias_values.extend(aliases[variant.lower()])
+
     variants.extend(alias_values)
 
     cleaned: list[str] = []
