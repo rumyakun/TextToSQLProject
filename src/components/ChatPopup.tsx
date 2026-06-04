@@ -252,6 +252,49 @@ function slotKey(slot: Course['slots'][number]) {
   return `${slot.day}-${slot.startHour}-${slot.endHour}`
 }
 
+const weekdayOrder: Record<Course['slots'][number]['day'], number> = {
+  Mon: 0,
+  Tue: 1,
+  Wed: 2,
+  Thu: 3,
+  Fri: 4,
+  Sat: 5,
+}
+const timePartDayPattern =
+  /(monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat|월요일|화요일|수요일|목요일|금요일|토요일|월|화|수|목|금|토)/i
+
+function sortSlots(slots: Course['slots']) {
+  return [...slots].sort(
+    (a, b) =>
+      weekdayOrder[a.day] - weekdayOrder[b.day] ||
+      a.startHour - b.startHour ||
+      a.endHour - b.endHour,
+  )
+}
+
+function timePartSortKey(value: string) {
+  const dayMatch = value.match(timePartDayPattern)
+  const day = dayMatch ? normalizeCourseDay(dayMatch[0]) : normalizeCourseDay(value)
+  const hour = parseCourseClockHour(value) ?? Number.POSITIVE_INFINITY
+  return {
+    dayOrder: day ? weekdayOrder[day] : Number.POSITIVE_INFINITY,
+    hour,
+    value,
+  }
+}
+
+function sortTimeParts(parts: string[]) {
+  return [...parts].sort((a, b) => {
+    const left = timePartSortKey(a)
+    const right = timePartSortKey(b)
+    return (
+      left.dayOrder - right.dayOrder ||
+      left.hour - right.hour ||
+      left.value.localeCompare(right.value)
+    )
+  })
+}
+
 function mergeCourses(existing: Course, next: Course): Course {
   const seenSlots = new Set(existing.slots.map(slotKey))
   const mergedSlots = [...existing.slots]
@@ -269,12 +312,14 @@ function mergeCourses(existing: Course, next: Course): Course {
     if (part === 'Time TBA' || timeParts.includes(part)) continue
     timeParts.push(part)
   }
+  const sortedTimeParts = sortTimeParts(timeParts)
 
   return {
     ...existing,
-    timeText: timeParts.length > 0 ? timeParts.join(', ') : existing.timeText,
+    timeText:
+      sortedTimeParts.length > 0 ? sortedTimeParts.join(', ') : existing.timeText,
     locationText: mergeTextList(existing.locationText, next.locationText),
-    slots: mergedSlots,
+    slots: sortSlots(mergedSlots),
     prerequisiteCourseCodes: mergeStringArrays(
       existing.prerequisiteCourseCodes,
       next.prerequisiteCourseCodes,
@@ -283,8 +328,27 @@ function mergeCourses(existing: Course, next: Course): Course {
       existing.prerequisiteCourseNames,
       next.prerequisiteCourseNames,
     ),
-    details: [...(existing.details ?? []), ...(next.details ?? [])],
+    details: mergeDetails(existing.details, next.details),
   }
+}
+
+function mergeDetails(existing?: CourseDetail[], next?: CourseDetail[]) {
+  const merged: CourseDetail[] = []
+  const byLabel = new Map<string, CourseDetail>()
+
+  for (const detail of [...(existing ?? []), ...(next ?? [])]) {
+    if (!detail.label || detail.value === '') continue
+    const current = byLabel.get(detail.label)
+    if (current) {
+      current.value = mergeTextList(current.value, detail.value) ?? current.value
+    } else {
+      const mergedDetail = { ...detail }
+      merged.push(mergedDetail)
+      byLabel.set(detail.label, mergedDetail)
+    }
+  }
+
+  return merged
 }
 
 function mergeStringArrays(existing?: string[], next?: string[]) {

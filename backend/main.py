@@ -158,6 +158,15 @@ DAY_ALIASES = {
     "일": "SUN",
     "일요일": "SUN",
 }
+DAY_SORT_INDEX = {
+    "MON": 0,
+    "TUE": 1,
+    "WED": 2,
+    "THU": 3,
+    "FRI": 4,
+    "SAT": 5,
+    "SUN": 6,
+}
 DAY_PATTERN = "|".join(
     re.escape(day)
     for day in sorted(DAY_ALIASES, key=len, reverse=True)
@@ -173,6 +182,11 @@ def _normalize_day(value) -> str | None:
         return None
     normalized = str(value).strip().lower()
     return DAY_ALIASES.get(normalized)
+
+
+def _day_sort_value(value) -> int:
+    day = _normalize_day(value) or str(value or "").strip().upper()
+    return DAY_SORT_INDEX.get(day, len(DAY_SORT_INDEX))
 
 
 def _format_time(hour: str, minute: str | None = None) -> str:
@@ -194,7 +208,20 @@ def _dedupe_schedule(slots: list[dict]) -> list[dict]:
             continue
         seen.add(key)
         deduped.append(slot)
-    return deduped
+    return _sort_schedule(deduped)
+
+
+def _schedule_sort_key(slot: dict) -> tuple:
+    return (
+        _day_sort_value(slot.get("day")),
+        str(slot.get("start") or ""),
+        str(slot.get("end") or ""),
+        str(slot.get("room") or ""),
+    )
+
+
+def _sort_schedule(slots: list[dict]) -> list[dict]:
+    return sorted(slots, key=_schedule_sort_key)
 
 
 def _parse_credits(value) -> int:
@@ -213,12 +240,13 @@ def _compact_value(value) -> str:
 
 def _split_course_list(value) -> list[str]:
     text = _compact_value(value)
-    if not text or text in {"없음", "None", "none", "-"}:
+    no_course_markers = {"없음", "\uc5c6\uc74c", "None", "none", "-"}
+    if not text or text in no_course_markers:
         return []
     return [
         part.strip()
         for part in re.split(r"[,;/\n]+", text)
-        if part.strip() and part.strip() not in {"없음", "None", "none", "-"}
+        if part.strip() and part.strip() not in no_course_markers
     ]
 
 
@@ -298,6 +326,20 @@ def _lecture_time_from_row(row: dict) -> str:
     return f"{day} {start}-{end}"
 
 
+def _lecture_time_sort_key(value: str) -> tuple:
+    text = str(value or "").strip()
+    day_match = re.search(DAY_PATTERN, text, flags=re.IGNORECASE)
+    time_match = re.search(r"([0-2]?\d)(?::([0-5]\d))?", text)
+    start = ""
+    if time_match:
+        start = _format_time(time_match.group(1), time_match.group(2))
+    return (
+        _day_sort_value(day_match.group(0) if day_match else ""),
+        start,
+        text,
+    )
+
+
 def _location_from_row(row: dict) -> str:
     return _compact_value(row.get("classroom") or row.get("room"))
 
@@ -349,7 +391,8 @@ def _merge_course_item(existing: dict, item: dict) -> dict:
     for time in [time for time in item.get("lectureTime", "").split(", ") if time]:
         if time not in existing_times:
             existing_times.append(time)
-    existing["lectureTime"] = ", ".join(existing_times)
+    existing["lectureTime"] = ", ".join(sorted(existing_times, key=_lecture_time_sort_key))
+    existing["schedule"] = _sort_schedule(existing.get("schedule", []))
 
     existing_locations = [location for location in existing.get("locationText", "").split(", ") if location]
     for location in [location for location in item.get("locationText", "").split(", ") if location]:
@@ -364,17 +407,39 @@ def _merge_course_item(existing: dict, item: dict) -> dict:
                 existing_values.append(value)
         existing[key] = existing_values
 
-    seen_details = {
-        (detail.get("label"), detail.get("value"))
-        for detail in existing.get("details", [])
-    }
-    for detail in item.get("details", []):
-        key = (detail.get("label"), detail.get("value"))
-        if key not in seen_details:
-            existing["details"].append(detail)
-            seen_details.add(key)
+    existing["details"] = _merge_detail_items(
+        existing.get("details", []),
+        item.get("details", []),
+    )
 
     return existing
+
+
+def _merge_detail_value(existing_value: str, next_value: str) -> str:
+    parts = [part.strip() for part in str(existing_value or "").split(",") if part.strip()]
+    for part in [part.strip() for part in str(next_value or "").split(",") if part.strip()]:
+        if part not in parts:
+            parts.append(part)
+    return ", ".join(parts)
+
+
+def _merge_detail_items(existing_details: list[dict], next_details: list[dict]) -> list[dict]:
+    merged = []
+    by_label = {}
+
+    for detail in [*existing_details, *next_details]:
+        label = detail.get("label")
+        value = detail.get("value")
+        if not label or value is None or value == "":
+            continue
+        if label in by_label:
+            by_label[label]["value"] = _merge_detail_value(by_label[label]["value"], str(value))
+        else:
+            merged_detail = {"label": label, "value": str(value)}
+            merged.append(merged_detail)
+            by_label[label] = merged_detail
+
+    return merged
 
 
 def _group_course_items(rows: list[dict]) -> list[dict]:
@@ -506,31 +571,61 @@ def list_courses(
         {where_clause}
     """
     sql = f"""
+        WITH page_course_keys AS (
+            SELECT subject_code, section
+            FROM v_course_info
+            {where_clause}
+            GROUP BY subject_code, section
+            ORDER BY subject_code, section
+            LIMIT %s OFFSET %s
+        )
         SELECT
-            course_year,
-            subject_code,
-            section,
-            subject_name,
-            category,
-            credit_hours,
-            target_year,
-            professor,
-            capacity,
-            enrolled,
-            grading_method,
-            eval_type,
-            class_mode,
-            dept_name,
-            day_of_week,
-            start_time,
-            end_time,
-            classroom,
-            prereq_subject_codes,
-            prereq_subject_names
-        FROM v_course_info
-        {where_clause}
-        ORDER BY subject_code, section
-        LIMIT %s OFFSET %s
+            ci.course_year,
+            ci.subject_code,
+            ci.section,
+            ci.subject_name,
+            ci.category,
+            ci.credit_hours,
+            ci.target_year,
+            ci.professor,
+            ci.capacity,
+            ci.enrolled,
+            ci.grading_method,
+            ci.eval_type,
+            ci.class_mode,
+            ci.dept_name,
+            ci.day_of_week,
+            ci.start_time,
+            ci.end_time,
+            ci.classroom,
+            ci.prereq_subject_codes,
+            ci.prereq_subject_names
+        FROM page_course_keys AS pk
+        JOIN v_course_info AS ci
+          ON ci.subject_code = pk.subject_code
+         AND ci.section IS NOT DISTINCT FROM pk.section
+        ORDER BY
+            ci.subject_code,
+            ci.section,
+            CASE ci.day_of_week
+                WHEN '월' THEN 1
+                WHEN '화' THEN 2
+                WHEN '수' THEN 3
+                WHEN '목' THEN 4
+                WHEN '금' THEN 5
+                WHEN '토' THEN 6
+                ELSE 7
+            END,
+            ci.start_time NULLS LAST
+    """
+    count_sql = f"""
+        SELECT COUNT(*) AS total
+        FROM (
+            SELECT subject_code, section
+            FROM v_course_info
+            {where_clause}
+            GROUP BY subject_code, section
+        ) AS course_keys
     """
 
     try:

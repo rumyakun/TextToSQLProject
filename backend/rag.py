@@ -1,5 +1,5 @@
 schema_docs = [
-    "v_course_info: integrated course information with day_of_week, start_time, end_time, classroom, and course_schedule for schedule filters. Query course data from this view only.",
+    "v_course_info: integrated course information with day_of_week, start_time, end_time, classroom, prereq_subject_codes, and prereq_subject_names. Query course data from this view only.",
     "course_prerequisite: prerequisite course information",
     "enrollment: student enrollment information",
     "required_subject: graduation requirement information",
