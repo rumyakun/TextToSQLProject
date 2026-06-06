@@ -1,5 +1,7 @@
+import json
 import logging
 import re
+import sys
 import time
 
 from .db import run_query
@@ -11,7 +13,7 @@ from .validate import validate_generated_sql
 
 
 logger = logging.getLogger("uvicorn.error")
-SQL_GENERATION_CACHE_VERSION = "course-view-v6"
+SQL_GENERATION_CACHE_VERSION = "course-view-v7"
 SQL_RESERVED_WORDS = {
     "cross",
     "full",
@@ -33,6 +35,14 @@ SCHEDULE_FILTER_COLUMNS = {
     "end_time",
     "start_time",
 }
+SQL_MASK_COLUMN_LABELS = {
+    "category": "CATEGORY",
+    "day_of_week": "DAY",
+    "dept_name": "DEPARTMENT",
+    "end_time": "TIME",
+    "start_time": "TIME",
+    "subject_name": "COURSE_NAME",
+}
 
 
 def enforce_limit(sql):
@@ -48,6 +58,103 @@ def _strip_trailing_semicolon(sql):
 def _sql_literal(value):
     text = str(value)
     return "'" + text.replace("'", "''") + "'"
+
+
+def _masked_sql_literal(value, label):
+    placeholder = f"<{label}>"
+    leading_wildcards = re.match(r"^[%_]*", value).group(0)
+    trailing_wildcards = re.search(r"[%_]*$", value).group(0)
+    if leading_wildcards or trailing_wildcards:
+        return f"'{leading_wildcards}{placeholder}{trailing_wildcards}'"
+    return f"'{placeholder}'"
+
+
+def mask_sql_query(sql):
+    column_group = "|".join(
+        re.escape(column)
+        for column in sorted(SQL_MASK_COLUMN_LABELS, key=len, reverse=True)
+    )
+
+    def replace_comparison(match):
+        column = match.group("column").lower()
+        label = SQL_MASK_COLUMN_LABELS[column]
+        return (
+            f"{match.group('left')}{match.group('op')}"
+            f"{match.group('space')}{_masked_sql_literal(match.group('value'), label)}"
+        )
+
+    masked = re.sub(
+        rf"(?P<left>\b(?:[a-z_][a-z0-9_]*\.)?(?P<column>{column_group})\b\s*)"
+        rf"(?P<op>ILIKE|LIKE|<>|!=|>=|<=|=|>|<)"
+        rf"(?P<space>\s*)'(?P<value>(?:''|[^'])*)'",
+        replace_comparison,
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+    def replace_between(match):
+        column = match.group("column").lower()
+        label = SQL_MASK_COLUMN_LABELS[column]
+        return (
+            f"{match.group('left')}BETWEEN {_masked_sql_literal(match.group('first'), label)} "
+            f"AND {_masked_sql_literal(match.group('second'), label)}"
+        )
+
+    masked = re.sub(
+        rf"(?P<left>\b(?:[a-z_][a-z0-9_]*\.)?(?P<column>{column_group})\b\s+)"
+        rf"BETWEEN\s+'(?P<first>(?:''|[^'])*)'\s+AND\s+'(?P<second>(?:''|[^'])*)'",
+        replace_between,
+        masked,
+        flags=re.IGNORECASE,
+    )
+
+    def replace_in(match):
+        column = match.group("column").lower()
+        label = SQL_MASK_COLUMN_LABELS[column]
+        values = re.findall(r"'((?:''|[^'])*)'", match.group("values"))
+        masked_values = ", ".join(_masked_sql_literal(value, label) for value in values)
+        return f"{match.group('left')}IN ({masked_values})"
+
+    masked = re.sub(
+        rf"(?P<left>\b(?:[a-z_][a-z0-9_]*\.)?(?P<column>{column_group})\b\s+)"
+        rf"IN\s*\((?P<values>(?:\s*'(?:''|[^']*)'\s*,?)+)\)",
+        replace_in,
+        masked,
+        flags=re.IGNORECASE,
+    )
+
+    return masked
+
+
+def _ensure_utf8_console():
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if not stream or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+def log_masked_sql(sql, masked_sql):
+    _ensure_utf8_console()
+    payload = {
+        "sql": sql,
+        "masked_sql": masked_sql,
+    }
+    print(f"SQL masking: {json.dumps(payload, ensure_ascii=False)}", flush=True)
+
+
+def _with_masked_sql(response):
+    sql = response.get("sql")
+    if not sql:
+        return response
+
+    masked_sql = mask_sql_query(sql)
+    response["masked_sql"] = masked_sql
+    log_masked_sql(sql, masked_sql)
+    return response
 
 
 def _find_v_course_info_alias(sql):
@@ -299,6 +406,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
             "db_ms": 0,
             "total_ms": int((time.perf_counter() - started_total) * 1000),
         }
+        _with_masked_sql(cached)
         return _with_query_context(cached, query, normalized_query, preprocessing)
 
     sql = None
@@ -346,6 +454,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
                     normalized_query,
                     preprocessing,
                 )
+                _with_masked_sql(res)
                 set_cache(cache_key, res)
                 log_query(normalized_query, executable_sql, True)
                 return res
@@ -364,6 +473,7 @@ def process(query, exclude_completed_courses=False, student_id=None):
             preprocessing,
         )
 
+        _with_masked_sql(res)
         set_cache(cache_key, res)
         log_query(normalized_query, executable_sql, True)
 
@@ -420,13 +530,14 @@ def process(query, exclude_completed_courses=False, student_id=None):
                         normalized_query,
                         preprocessing,
                     )
+                    _with_masked_sql(res)
                     set_cache(cache_key, res)
                     log_query(normalized_query, executable_fixed, True)
                     return res
                 raise
 
             timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
-            return _with_query_context(
+            res = _with_query_context(
                 {
                     "sql": executable_fixed,
                     "data": result,
@@ -437,6 +548,8 @@ def process(query, exclude_completed_courses=False, student_id=None):
                 normalized_query,
                 preprocessing,
             )
+            _with_masked_sql(res)
+            return res
 
         except Exception as e2:
             log_query(normalized_query, sql, False)

@@ -7,6 +7,15 @@ import re
 from .prompt import build_prompt
 
 
+def _ollama_timeout() -> float:
+    raw_timeout = os.getenv("OLLAMA_TIMEOUT", "120").strip()
+    try:
+        timeout = float(raw_timeout)
+    except ValueError:
+        return 120
+    return timeout if timeout > 0 else 120
+
+
 def _ollama_generate(prompt: str) -> str:
     base_url = os.getenv("OLLAMA_BASE_URL", ).strip().rstrip("/")
     configured_model = os.getenv("OLLAMA_MODEL", ).strip()
@@ -44,7 +53,7 @@ def _ollama_generate(prompt: str) -> str:
         )
 
         try:
-            with request.urlopen(req, timeout=120) as res:
+            with request.urlopen(req, timeout=_ollama_timeout()) as res:
                 body = json.loads(res.read().decode("utf-8"))
             output = (body.get("response") or "").strip()
             if not output:
