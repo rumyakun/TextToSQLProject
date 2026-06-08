@@ -11,7 +11,7 @@ Relevant schema:
 {relevant}
 
 Full schema:
-v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom)
+v_course_info(course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom, prereq_subject_codes, prereq_subject_names)
 
 Column details:
 - course_year: integer (1, 2, 3, 4). Use exact match: course_year = 1.
@@ -22,11 +22,15 @@ Column details:
 - If the user mentions an exact clock hour, use exact match on start_time: start_time = 'HH:00:00'.
 - Map Korean class-hour queries between 1 and 7 o'clock to 13:00:00 through 19:00:00: 1시 -> '13:00:00', 2시 -> '14:00:00', 3시 -> '15:00:00', 4시 -> '16:00:00', 5시 -> '17:00:00', 6시 -> '18:00:00', 7시 -> '19:00:00'.
 - class_mode: Do NOT use this column unless the user explicitly asks for online/offline/real-time classes.
+- prereq_subject_codes: comma-separated prerequisite subject codes. '없음' means there is no prerequisite.
+- prereq_subject_names: comma-separated prerequisite subject names. '없음' means there is no prerequisite.
 
 Rules:
 - ONLY SELECT
 - USE ONLY the tables and columns listed in the schema above.
 - DO NOT invent or guess table names (e.g., never use 'courses', use 'v_course_info' instead).
+- Query course data from v_course_info only. Do not join course_schedule.
+- For course search results, SELECT course_year, subject_code, section, subject_name, category, credit_hours, target_year, professor, capacity, enrolled, grading_method, eval_type, class_mode, dept_name, day_of_week, start_time, end_time, classroom, prereq_subject_codes, prereq_subject_names.
 - For time information in the user query, use exact start_time equality, not BETWEEN, >=, <=, >, or <, unless the user explicitly asks for a range, before/after, morning, or afternoon.
 - For 1시 through 7시, map to afternoon 24-hour time before exact matching: start_time = '13:00:00' through start_time = '19:00:00'.
 - ALWAYS include all category information mentioned by the user (e.g., '전공', '교양', '전공(핵심)') in the category filter.

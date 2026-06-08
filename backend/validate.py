@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from typing import TypedDict
+import sqlglot
+from sqlglot import exp
 
 
 class ValidationResult(TypedDict):
@@ -35,13 +37,34 @@ ALLOWED_STUDENT_ID_PLACEHOLDERS = {
 STUDENT_SCOPED_TABLES = {"student", "enrollment"}
 
 
+def _parse_sql(sql: str) -> exp.Expression | None:
+    try:
+        return sqlglot.parse_one(sql, read="postgres")
+    except Exception:
+        return None
+
+
 def extract_table_references(sql: str) -> set[str]:
-    matches = re.findall(r"\b(?:from|join)\s+([a-z_][a-z0-9_]*)\b", sql)
+    ast = _parse_sql(sql)
+    if ast:
+        return {table.name.lower() for table in ast.find_all(exp.Table) if table.name}
+    
+    # Fallback to regex if parsing fails
+    clean_sql = re.sub(r"\bis\s+not\s+distinct\s+from\b", "=", sql, flags=re.IGNORECASE)
+    matches = re.findall(r"\b(?:from|join)\s+([a-z_][a-z0-9_]*)\b", clean_sql)
     return set(matches)
 
 
 def extract_table_aliases(sql: str, table_name: str) -> set[str]:
     aliases = {table_name}
+    ast = _parse_sql(sql)
+    if ast:
+        for table in ast.find_all(exp.Table):
+            if table.name.lower() == table_name and table.alias:
+                aliases.add(table.alias.lower())
+        return aliases
+
+    # Fallback to regex
     matches = re.findall(
         rf"\b(?:from|join)\s+{re.escape(table_name)}(?:\s+as)?\s+([a-z_][a-z0-9_]*)\b",
         sql,
@@ -52,6 +75,14 @@ def extract_table_aliases(sql: str, table_name: str) -> set[str]:
 
 def find_disallowed_student_columns(sql: str, student_aliases: set[str]) -> set[str]:
     referenced_columns: set[str] = set()
+    ast = _parse_sql(sql)
+    if ast:
+        for column in ast.find_all(exp.Column):
+            if column.table.lower() in student_aliases:
+                referenced_columns.add(column.name.lower())
+        return referenced_columns - ALLOWED_STUDENT_COLUMNS
+
+    # Fallback to regex
     for alias in student_aliases:
         pattern = rf"\b{re.escape(alias)}\.([a-z_][a-z0-9_]*)\b"
         referenced_columns.update(re.findall(pattern, sql))
@@ -59,37 +90,70 @@ def find_disallowed_student_columns(sql: str, student_aliases: set[str]) -> set[
 
 
 def selects_student_data(sql: str, student_aliases: set[str]) -> bool:
+    ast = _parse_sql(sql)
+    if ast:
+        for select in ast.find_all(exp.Select):
+            for projection in select.expressions:
+                if isinstance(projection, exp.Column):
+                    if isinstance(projection.this, exp.Star) and projection.table.lower() in student_aliases:
+                        return True
+                for col in projection.find_all(exp.Column):
+                    if col.table.lower() in student_aliases:
+                        return True
+        return False
+
+    # Fallback to regex
     select_match = re.search(r"\bselect\b(.*?)\bfrom\b", sql, flags=re.DOTALL)
     if not select_match:
         return False
-
     select_clause = select_match.group(1)
     for alias in student_aliases:
         if re.search(rf"\b{re.escape(alias)}\.\*", select_clause):
             return True
         if re.search(rf"\b{re.escape(alias)}\.[a-z_][a-z0-9_]*\b", select_clause):
             return True
-
     return False
 
 
 def has_scoped_student_filter(sql: str, table_aliases: set[str], requested_student_id: str | None) -> bool:
-    allowed_rhs_patterns = [re.escape(placeholder) for placeholder in ALLOWED_STUDENT_ID_PLACEHOLDERS]
+    ast = _parse_sql(sql)
+    allowed_rhs_patterns = set(ALLOWED_STUDENT_ID_PLACEHOLDERS)
+    if requested_student_id is not None:
+        allowed_rhs_patterns.add(str(requested_student_id))
+        allowed_rhs_patterns.add(f"'{requested_student_id}'")
+        allowed_rhs_patterns.add(f'"{requested_student_id}"')
+
+    if ast:
+        for eq in ast.find_all(exp.EQ):
+            left, right = eq.left, eq.right
+            
+            def is_student_id_col(node):
+                return isinstance(node, exp.Column) and node.table.lower() in table_aliases and node.name.lower() == "student_id"
+                
+            def matches_rhs(node):
+                if isinstance(node, (exp.Literal, exp.Identifier, exp.Var, exp.Parameter)):
+                    val = str(node.name)
+                    return val in allowed_rhs_patterns or f"'{val}'" in allowed_rhs_patterns or f'"{val}"' in allowed_rhs_patterns
+                unparsed = node.sql()
+                return unparsed in allowed_rhs_patterns or f"'{unparsed}'" in allowed_rhs_patterns or f'"{unparsed}"' in allowed_rhs_patterns
+
+            if is_student_id_col(left) and matches_rhs(right):
+                return True
+            if is_student_id_col(right) and matches_rhs(left):
+                return True
+
+    # Fallback to regex
+    allowed_rhs_regex = [re.escape(placeholder) for placeholder in ALLOWED_STUDENT_ID_PLACEHOLDERS]
     if requested_student_id is not None:
         escaped_id = re.escape(str(requested_student_id))
-        allowed_rhs_patterns.extend(
-            [
-                rf"'{escaped_id}'",
-                rf'"{escaped_id}"',
-                escaped_id,
-            ]
-        )
+        allowed_rhs_regex.extend([rf"'{escaped_id}'", rf'"{escaped_id}"', escaped_id])
 
-    rhs_group = "|".join(allowed_rhs_patterns)
+    rhs_group = "|".join(allowed_rhs_regex)
     for alias in table_aliases:
         pattern = rf"\b{re.escape(alias)}\.student_id\s*=\s*(?:{rhs_group})(?![a-z0-9_])"
         if re.search(pattern, sql):
             return True
+            
     return False
 
 
@@ -148,13 +212,6 @@ def validate_generated_sql(
 
     return {"ok": True, "reason": None}
 
-
 if __name__ == "__main__":
-    sample_sql = (
-        "SELECT DISTINCT c.* "
-        "FROM cnu_courses AS c "
-        "JOIN enrollment AS e ON e.subject_code = c.subject_code "
-        "WHERE e.student_id = 20240001 "
-        "LIMIT 5;"
-    )
-    print(validate_generated_sql(sample_sql, requested_student_id="20240001"))
+    sample_sql1 = "SELECT c.* FROM v_course_info AS c JOIN (SELECT DISTINCT v_course_info.subject_code, v_course_info.section FROM v_course_info WHERE dept_name = '컴퓨터융합학부' AND target_year = 3 AND category = '전공(핵심)' AND day_of_week = '목') AS matched_courses ON c.subject_code = matched_courses.subject_code AND c.section IS NOT DISTINCT FROM matched_courses.section ORDER BY c.subject_code LIMIT 200"
+    print(validate_generated_sql(sample_sql1))
