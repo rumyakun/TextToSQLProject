@@ -4,6 +4,7 @@ python-dotenv
 psycopg2-binary
 redis
 rapidfuzz
-torch
-transformers
+transformers==4.46.3
 sqlglot
+numpy
+safetensors

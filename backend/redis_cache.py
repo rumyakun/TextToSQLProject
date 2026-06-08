@@ -8,7 +8,7 @@ import redis
 _memory_cache: dict[str, tuple[float, Any]] = {}
 
 
-def _get_client():
+def get_redis_client():
     url = os.getenv("REDIS_URL", "").strip()
     if not url:
         return None
@@ -19,8 +19,9 @@ def _get_client():
     except Exception:
         return None
 
+
 def get_cache(key):
-    client = _get_client()
+    client = get_redis_client()
     if client is not None:
         val = client.get(key)
         if val:
@@ -37,10 +38,17 @@ def get_cache(key):
         return None
     return value
 
-def set_cache(key, value):
-    client = _get_client()
+
+def set_cache(key, value, ttl_seconds=300):
+    ttl_seconds = int(ttl_seconds) if ttl_seconds is not None else None
+    client = get_redis_client()
     if client is not None:
-        client.setex(key, 300, json.dumps(value))  # 5분 캐싱
+        encoded = json.dumps(value, ensure_ascii=False)
+        if ttl_seconds and ttl_seconds > 0:
+            client.setex(key, ttl_seconds, encoded)
+        else:
+            client.set(key, encoded)
         return
 
-    _memory_cache[key] = (time.time() + 300, value)
+    expires_at = time.time() + ttl_seconds if ttl_seconds and ttl_seconds > 0 else float("inf")
+    _memory_cache[key] = (expires_at, value)
