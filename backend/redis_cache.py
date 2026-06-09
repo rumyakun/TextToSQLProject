@@ -6,6 +6,7 @@ from typing import Any
 import redis
 
 _memory_cache: dict[str, tuple[float, Any]] = {}
+MAX_MEMORY_CACHE_SIZE = 1000  # Fallback 메모리 캐시 최대 크기
 
 
 _redis_client = None
@@ -43,6 +44,10 @@ def get_cache(key):
     if expires_at < now:
         _memory_cache.pop(key, None)
         return None
+        
+    # LRU 동작: 접근한 아이템을 가장 최신(맨 뒤)으로 갱신하여 메모리 유지 우선순위 높임
+    _memory_cache.pop(key, None)
+    _memory_cache[key] = item
     return value
 
 
@@ -59,3 +64,11 @@ def set_cache(key, value, ttl_seconds=300):
 
     expires_at = time.time() + ttl_seconds if ttl_seconds and ttl_seconds > 0 else float("inf")
     _memory_cache[key] = (expires_at, value)
+
+    # 용량 제한 방어 로직: 캐시 크기가 제한을 넘으면 가장 오래된(맨 앞의) 아이템 삭제
+    if len(_memory_cache) > MAX_MEMORY_CACHE_SIZE:
+        try:
+            oldest_key = next(iter(_memory_cache))
+            _memory_cache.pop(oldest_key, None)
+        except (StopIteration, RuntimeError):
+            pass
