@@ -8,13 +8,20 @@ import redis
 _memory_cache: dict[str, tuple[float, Any]] = {}
 
 
+_redis_client = None
+
 def get_redis_client():
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+        
     url = os.getenv("REDIS_URL", "").strip()
     if not url:
         return None
     try:
         client = redis.Redis.from_url(url)
         client.ping()
+        _redis_client = client
         return client
     except Exception:
         return None
