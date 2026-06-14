@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import re
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -21,6 +22,13 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "course_custom_ner_model" / "models" / "course-custom-ner"
 REFERENCE_LIMIT = int(os.getenv("KEYWORD_REFERENCE_LIMIT", "20000"))
 DEFAULT_MIN_SCORE = float(os.getenv("KEYWORD_CORRECTION_MIN_SCORE", "78"))
+MASKABLE_ENTITY_LABELS = {
+    "CATEGORY",
+    "COURSE_NAME",
+    "DAY",
+    "DEPARTMENT",
+    "TIME",
+}
 
 ## NER label이 DB의 어느 테이블, 컬럼과 매핑되는지 정의.
 ## 교정된 값이 DB에 존재하는지 확인하기 위함.
@@ -487,6 +495,56 @@ def build_corrected_query(query: str, corrected_entities: list[dict[str, Any]]) 
     return corrected_query
 
 
+def build_masked_query(query: str, entities: list[dict[str, Any]]) -> str:
+    masked_query = query
+    used_ranges: list[tuple[int, int]] = []
+
+    for entity in sorted(entities, key=lambda item: item["start"], reverse=True):
+        label = entity.get("label")
+        if label not in MASKABLE_ENTITY_LABELS:
+            continue
+
+        start = int(entity["start"])
+        end = int(entity["end"])
+        if any(not (end <= used_start or start >= used_end) for used_start, used_end in used_ranges):
+            continue
+
+        masked_query = masked_query[:start] + f"<{label}>" + masked_query[end:]
+        used_ranges.append((start, end))
+
+    return masked_query
+
+
+def _ensure_utf8_console() -> None:
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if not stream or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+def log_ner_masking(query: str, entities: list[dict[str, Any]], masked_query: str) -> None:
+    _ensure_utf8_console()
+    payload = {
+        "query": query,
+        "entities": [
+            {
+                "text": entity.get("text"),
+                "label": entity.get("label"),
+                "start": entity.get("start"),
+                "end": entity.get("end"),
+                "score": entity.get("score"),
+            }
+            for entity in entities
+        ],
+        "masked_query": masked_query,
+    }
+    print(f"NER masking: {json.dumps(payload, ensure_ascii=False)}", flush=True)
+
+
 def preprocess_query(
     query: str,
     model_dir: str | Path = MODEL_DIR,
@@ -499,9 +557,12 @@ def preprocess_query(
         entities = predictor.extract(query)
         corrected_entities = correct_ner_entities(entities, references)
         corrected_query = build_corrected_query(query, corrected_entities)
+        masked_query = build_masked_query(query, entities)
+        log_ner_masking(query, entities, masked_query)
         return {
             "query": query,
             "corrected_query": corrected_query,
+            "masked_query": masked_query,
             "changed": corrected_query != query,
             "entities": entities,
             "slots": build_slots(entities),
@@ -515,6 +576,7 @@ def preprocess_query(
         return {
             "query": query,
             "corrected_query": query,
+            "masked_query": query,
             "changed": False,
             "entities": [],
             "slots": {},

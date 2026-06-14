@@ -1,17 +1,23 @@
+import json
 import logging
 import re
+import sys
 import time
 
 from .db import run_query
 from .keyword_extract import preprocess_query
 from .llm import fix_sql, generate_sql
-from .redis_cache import get_cache, set_cache
 from .utils import log_query
 from .validate import validate_generated_sql
+from .vector_cache import (
+    extract_mask_values,
+    find_vector_cache,
+    materialize_masked_sql,
+    store_vector_cache_async,
+)
 
 
 logger = logging.getLogger("uvicorn.error")
-SQL_GENERATION_CACHE_VERSION = "course-view-v6"
 SQL_RESERVED_WORDS = {
     "cross",
     "full",
@@ -33,6 +39,14 @@ SCHEDULE_FILTER_COLUMNS = {
     "end_time",
     "start_time",
 }
+SQL_MASK_COLUMN_LABELS = {
+    "category": "CATEGORY",
+    "day_of_week": "DAY",
+    "dept_name": "DEPARTMENT",
+    "end_time": "TIME",
+    "start_time": "TIME",
+    "subject_name": "COURSE_NAME",
+}
 
 
 def enforce_limit(sql):
@@ -48,6 +62,122 @@ def _strip_trailing_semicolon(sql):
 def _sql_literal(value):
     text = str(value)
     return "'" + text.replace("'", "''") + "'"
+
+
+def _masked_sql_literal(value, label):
+    placeholder = f"<{label}>"
+    leading_wildcards = re.match(r"^[%_]*", value).group(0)
+    trailing_wildcards = re.search(r"[%_]*$", value).group(0)
+    if leading_wildcards or trailing_wildcards:
+        return f"'{leading_wildcards}{placeholder}{trailing_wildcards}'"
+    return f"'{placeholder}'"
+
+
+def mask_sql_query(sql):
+    column_group = "|".join(
+        re.escape(column)
+        for column in sorted(SQL_MASK_COLUMN_LABELS, key=len, reverse=True)
+    )
+
+    def replace_comparison(match):
+        column = match.group("column").lower()
+        label = SQL_MASK_COLUMN_LABELS[column]
+        return (
+            f"{match.group('left')}{match.group('op')}"
+            f"{match.group('space')}{_masked_sql_literal(match.group('value'), label)}"
+        )
+
+    masked = re.sub(
+        rf"(?P<left>\b(?:[a-z_][a-z0-9_]*\.)?(?P<column>{column_group})\b\s*)"
+        rf"(?P<op>ILIKE|LIKE|<>|!=|>=|<=|=|>|<)"
+        rf"(?P<space>\s*)'(?P<value>(?:''|[^'])*)'",
+        replace_comparison,
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+    def replace_between(match):
+        column = match.group("column").lower()
+        label = SQL_MASK_COLUMN_LABELS[column]
+        return (
+            f"{match.group('left')}BETWEEN {_masked_sql_literal(match.group('first'), label)} "
+            f"AND {_masked_sql_literal(match.group('second'), label)}"
+        )
+
+    masked = re.sub(
+        rf"(?P<left>\b(?:[a-z_][a-z0-9_]*\.)?(?P<column>{column_group})\b\s+)"
+        rf"BETWEEN\s+'(?P<first>(?:''|[^'])*)'\s+AND\s+'(?P<second>(?:''|[^'])*)'",
+        replace_between,
+        masked,
+        flags=re.IGNORECASE,
+    )
+
+    def replace_in(match):
+        column = match.group("column").lower()
+        label = SQL_MASK_COLUMN_LABELS[column]
+        values = re.findall(r"'((?:''|[^'])*)'", match.group("values"))
+        masked_values = ", ".join(_masked_sql_literal(value, label) for value in values)
+        return f"{match.group('left')}IN ({masked_values})"
+
+    masked = re.sub(
+        rf"(?P<left>\b(?:[a-z_][a-z0-9_]*\.)?(?P<column>{column_group})\b\s+)"
+        rf"IN\s*\((?P<values>(?:\s*'(?:''|[^']*)'\s*,?)+)\)",
+        replace_in,
+        masked,
+        flags=re.IGNORECASE,
+    )
+
+    return masked
+
+
+def _ensure_utf8_console():
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if not stream or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+def log_masked_sql(sql, masked_sql):
+    _ensure_utf8_console()
+    payload = {
+        "sql": sql,
+        "masked_sql": masked_sql,
+    }
+    print(f"SQL masking: {json.dumps(payload, ensure_ascii=False)}", flush=True)
+
+
+def log_cache_status(cache_hit, query, masked_query, lookup_ms, vector_hit=None, reason=None):
+    _ensure_utf8_console()
+    payload = {
+        "cache_hit": cache_hit,
+        "cache_type": "redis-vector",
+        "query": query,
+        "masked_query": masked_query,
+        "lookup_ms": lookup_ms,
+    }
+    if vector_hit:
+        payload["cache_key"] = vector_hit.cache_key
+        payload["similarity"] = round(vector_hit.similarity, 4)
+    if reason:
+        payload["reason"] = reason
+
+    status = "HIT" if cache_hit else "MISS"
+    print(f"Cache {status}: {json.dumps(payload, ensure_ascii=False)}", flush=True)
+
+
+def _with_masked_sql(response):
+    sql = response.get("sql")
+    if not sql:
+        return response
+
+    masked_sql = mask_sql_query(sql)
+    response["masked_sql"] = masked_sql
+    log_masked_sql(sql, masked_sql)
+    return response
 
 
 def _find_v_course_info_alias(sql):
@@ -266,6 +396,12 @@ def _with_query_context(response, query, normalized_query, preprocessing):
     return response
 
 
+def _store_vector_sql_cache(preprocessing, response, base_sql=None):
+    masked_query = preprocessing.get("masked_query") or ""
+    masked_sql = mask_sql_query(base_sql) if base_sql else response.get("masked_sql") or ""
+    return store_vector_cache_async(masked_query, masked_sql)
+
+
 def process(query, exclude_completed_courses=False, student_id=None):
     started_total = time.perf_counter()
     timings = {
@@ -283,23 +419,89 @@ def process(query, exclude_completed_courses=False, student_id=None):
     timings["preprocess_ms"] = int((time.perf_counter() - t_pre) * 1000)
 
     t0 = time.perf_counter()
-    cache_key = f"{SQL_GENERATION_CACHE_VERSION}::{normalized_query}"
-    if exclude_completed_courses:
-        cache_key = f"{SQL_GENERATION_CACHE_VERSION}::{normalized_query}::exclude_completed::{student_id}"
-
-    cached = get_cache(cache_key)
+    masked_query = preprocessing.get("masked_query") or ""
+    cache_miss_reason = None
+    vector_hit = find_vector_cache(masked_query)
     timings["cache_lookup_ms"] = int((time.perf_counter() - t0) * 1000)
-    if cached:
-        cached["cache_hit"] = True
-        cached["timings_ms"] = {
-            "cache_lookup_ms": timings["cache_lookup_ms"],
-            "preprocess_ms": timings["preprocess_ms"],
-            "llm_ms": 0,
-            "validate_ms": 0,
-            "db_ms": 0,
-            "total_ms": int((time.perf_counter() - started_total) * 1000),
-        }
-        return _with_query_context(cached, query, normalized_query, preprocessing)
+    if vector_hit:
+        mask_values = extract_mask_values(preprocessing)
+        cached_sql = materialize_masked_sql(vector_hit.masked_sql, mask_values)
+        if re.search(r"<[A-Z_]+>", cached_sql):
+            vector_hit = None
+            cache_miss_reason = "unresolved_mask_placeholders"
+        else:
+            executable_sql = build_executable_sql(
+                cached_sql,
+                exclude_completed_courses,
+                student_id,
+            )
+    elif cache_miss_reason is None:
+        cache_miss_reason = "no_matching_entry"
+
+    log_cache_status(
+        vector_hit is not None,
+        normalized_query,
+        masked_query,
+        timings["cache_lookup_ms"],
+        vector_hit=vector_hit,
+        reason=cache_miss_reason if vector_hit is None else None,
+    )
+
+    if vector_hit:
+
+        t_val = time.perf_counter()
+        validate_sql(cached_sql, query=normalized_query)
+        if executable_sql != cached_sql or exclude_completed_courses:
+            validate_sql(
+                executable_sql,
+                requested_student_id=str(student_id) if exclude_completed_courses else None,
+                query=normalized_query,
+            )
+        timings["validate_ms"] = int((time.perf_counter() - t_val) * 1000)
+
+        try:
+            t_db = time.perf_counter()
+            result = run_query(executable_sql)
+            timings["db_ms"] = int((time.perf_counter() - t_db) * 1000)
+        except RuntimeError as db_err:
+            if "DATABASE_URL is not set" in str(db_err):
+                timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
+                res = _with_query_context(
+                    {
+                        "sql": executable_sql,
+                        "masked_sql": vector_hit.masked_sql,
+                        "data": [],
+                        "warning": "DATABASE_URL is not set. SQL only mode is active.",
+                        "cache_hit": True,
+                        "cache_type": "redis-vector",
+                        "cache_similarity": round(vector_hit.similarity, 4),
+                        "timings_ms": timings,
+                    },
+                    query,
+                    normalized_query,
+                    preprocessing,
+                )
+                log_query(normalized_query, executable_sql, True)
+                return res
+            raise
+
+        timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
+        res = _with_query_context(
+            {
+                "sql": executable_sql,
+                "masked_sql": vector_hit.masked_sql,
+                "data": result,
+                "cache_hit": True,
+                "cache_type": "redis-vector",
+                "cache_similarity": round(vector_hit.similarity, 4),
+                "timings_ms": timings,
+            },
+            query,
+            normalized_query,
+            preprocessing,
+        )
+        log_query(normalized_query, executable_sql, True)
+        return res
 
     sql = None
 
@@ -346,7 +548,12 @@ def process(query, exclude_completed_courses=False, student_id=None):
                     normalized_query,
                     preprocessing,
                 )
-                set_cache(cache_key, res)
+                _with_masked_sql(res)
+                _store_vector_sql_cache(
+                    preprocessing,
+                    res,
+                    base_sql=sql if exclude_completed_courses else None,
+                )
                 log_query(normalized_query, executable_sql, True)
                 return res
             raise
@@ -364,7 +571,12 @@ def process(query, exclude_completed_courses=False, student_id=None):
             preprocessing,
         )
 
-        set_cache(cache_key, res)
+        _with_masked_sql(res)
+        _store_vector_sql_cache(
+            preprocessing,
+            res,
+            base_sql=sql if exclude_completed_courses else None,
+        )
         log_query(normalized_query, executable_sql, True)
 
         return res
@@ -420,13 +632,18 @@ def process(query, exclude_completed_courses=False, student_id=None):
                         normalized_query,
                         preprocessing,
                     )
-                    set_cache(cache_key, res)
+                    _with_masked_sql(res)
+                    _store_vector_sql_cache(
+                        preprocessing,
+                        res,
+                        base_sql=fixed if exclude_completed_courses else None,
+                    )
                     log_query(normalized_query, executable_fixed, True)
                     return res
                 raise
 
             timings["total_ms"] = int((time.perf_counter() - started_total) * 1000)
-            return _with_query_context(
+            res = _with_query_context(
                 {
                     "sql": executable_fixed,
                     "data": result,
@@ -437,6 +654,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
                 normalized_query,
                 preprocessing,
             )
+            _with_masked_sql(res)
+            _store_vector_sql_cache(
+                preprocessing,
+                res,
+                base_sql=fixed if exclude_completed_courses else None,
+            )
+            return res
 
         except Exception as e2:
             log_query(normalized_query, sql, False)
