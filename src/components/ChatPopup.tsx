@@ -418,6 +418,7 @@ export default function ChatPopup({
   const [hoveredCourse, setHoveredCourse] = useState<Course | null>(null)
   const [excludeCompletedCourses, setExcludeCompletedCourses] = useState(false)
   const [guidelineOpen, setGuidelineOpen] = useState(true)
+  const [sqlOpen, setSqlOpen] = useState(true)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -678,7 +679,7 @@ export default function ChatPopup({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') send()
                 }}
-                placeholder="e.g. 데이터베이스, 네트워크, ML..."
+                placeholder="예: 컴퓨터융합학부 전공 과목 보여줘"
                 disabled={loading}
                 className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
               />
@@ -712,7 +713,22 @@ export default function ChatPopup({
               </button>
               {guidelineOpen ? (
                 <div className="border-t border-slate-100 px-3 py-2 text-xs leading-5 text-slate-600">
-                  원하는 강의 조건을 과목명, 학과, 요일, 시간, 이수구분처럼 구체적으로 적으면 더 정확한 결과를 볼 수 있습니다.
+                  <ul className="list-disc space-y-1 pl-4">
+                    <li>과목명은 가능한 한 정확히 입력해 주세요. 줄임말이나 오타가 있으면 결과가 잘 나오지 않을 수 있습니다.</li>
+                    <li>과목명과 학과명은 공식 명칭과 띄어쓰기에 가깝게 입력할수록 정확합니다. 띄어쓰기가 많이 다르면 결과가 누락될 수 있습니다.</li>
+                    <li>학과, 학년, 이수구분, 요일처럼 원하는 조건을 함께 적으면 더 정확합니다.</li>
+                    <li>시간은 24시간 형식으로 적어 주세요. 예: 오전 2시는 2시, 오후 2시는 14시.</li>
+                    <li>현재는 SQL 질의문으로 조회 가능한 조건만 처리합니다.</li>
+                    <li>현재 시간표의 빈 시간에 맞는 강의 추천, 남은 학점에 따른 자동 추천처럼 개인 상황을 해석하는 요청은 아직 지원하지 않습니다.</li>
+                  </ul>
+                  <div className="mt-2 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-blue-800">
+                    <div className="mb-0.5 text-[11px] font-semibold text-blue-700">
+                      예시
+                    </div>
+                    <div className="font-medium">
+                      컴퓨터융합학부 3학년 전공핵심 중 목요일 14시 강의 보여줘.
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -727,13 +743,23 @@ export default function ChatPopup({
               </div>
             )}
             {lastSql && (
-              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="mb-1 text-[11px] font-semibold text-slate-600">
-                  Generated SQL
-                </div>
-                <pre className="overflow-x-auto whitespace-pre-wrap break-all text-[11px] text-slate-700">
-                  {lastSql}
-                </pre>
+              <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50">
+                <button
+                  type="button"
+                  onClick={() => setSqlOpen((open) => !open)}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100"
+                  aria-expanded={sqlOpen}
+                >
+                  <span>Generated SQL</span>
+                  <span className="text-slate-400">
+                    {sqlOpen ? '접기' : '펼치기'}
+                  </span>
+                </button>
+                {sqlOpen ? (
+                  <pre className="border-t border-slate-200 px-3 py-2 overflow-x-auto whitespace-pre-wrap break-all text-[11px] text-slate-700">
+                    {lastSql}
+                  </pre>
+                ) : null}
               </div>
             )}
           </div>
