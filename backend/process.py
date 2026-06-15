@@ -169,6 +169,19 @@ def log_cache_status(cache_hit, query, masked_query, lookup_ms, vector_hit=None,
     print(f"Cache {status}: {json.dumps(payload, ensure_ascii=False)}", flush=True)
 
 
+def log_sql_response_time(query, normalized_query, sql, timings, cache_hit):
+    _ensure_utf8_console()
+    payload = {
+        "query": query,
+        "normalized_query": normalized_query,
+        "sql": sql,
+        "cache_hit": cache_hit,
+        "total_sec": round(timings.get("total_ms", 0) / 1000, 3),
+        "db_sec": round(timings.get("db_ms", 0) / 1000, 3),
+    }
+    print(f"SQL response time: {json.dumps(payload, ensure_ascii=False)}", flush=True)
+
+
 def _with_masked_sql(response):
     sql = response.get("sql")
     if not sql:
@@ -482,6 +495,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
                     preprocessing,
                 )
                 log_query(normalized_query, executable_sql, True)
+                log_sql_response_time(
+                    query,
+                    normalized_query,
+                    executable_sql,
+                    timings,
+                    True,
+                )
                 return res
             raise
 
@@ -501,6 +521,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
             preprocessing,
         )
         log_query(normalized_query, executable_sql, True)
+        log_sql_response_time(
+            query,
+            normalized_query,
+            executable_sql,
+            timings,
+            True,
+        )
         return res
 
     sql = None
@@ -555,6 +582,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
                     base_sql=sql if exclude_completed_courses else None,
                 )
                 log_query(normalized_query, executable_sql, True)
+                log_sql_response_time(
+                    query,
+                    normalized_query,
+                    executable_sql,
+                    timings,
+                    False,
+                )
                 return res
             raise
 
@@ -578,6 +612,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
             base_sql=sql if exclude_completed_courses else None,
         )
         log_query(normalized_query, executable_sql, True)
+        log_sql_response_time(
+            query,
+            normalized_query,
+            executable_sql,
+            timings,
+            False,
+        )
 
         return res
 
@@ -639,6 +680,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
                         base_sql=fixed if exclude_completed_courses else None,
                     )
                     log_query(normalized_query, executable_fixed, True)
+                    log_sql_response_time(
+                        query,
+                        normalized_query,
+                        executable_fixed,
+                        timings,
+                        False,
+                    )
                     return res
                 raise
 
@@ -659,6 +707,13 @@ def process(query, exclude_completed_courses=False, student_id=None):
                 preprocessing,
                 res,
                 base_sql=fixed if exclude_completed_courses else None,
+            )
+            log_sql_response_time(
+                query,
+                normalized_query,
+                executable_fixed,
+                timings,
+                False,
             )
             return res
 
