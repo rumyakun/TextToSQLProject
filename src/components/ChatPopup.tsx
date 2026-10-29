@@ -1,4 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  chatErrorMessage,
+  chatRowsToLegacyRows,
+  structuredTimeText,
+  TIME_TBA_TEXT,
+  answerWarning,
+  describeAnswer,
+  describeChatModel,
+  describeUnderstood,
+  fetchChatModels,
+  postChatQuery,
+  QUERYIR_TIME_GUIDE,
+} from '../adaptive/chatQuery.ts'
+import type { ChatModelOption, ChatTarget } from '../adaptive/chatQuery.ts'
 import { getAccessToken } from '../services/apiClient'
 import type { Course, CourseDetail } from '../types/course'
 import { cn } from '../utils/cn'
@@ -100,7 +114,7 @@ function readStringList(row: QueryRow, keys: string[]) {
     .filter((part) => part && !ignored.has(part.toLowerCase()))
 }
 
-function readDetails(row: QueryRow): CourseDetail[] {
+function readDetails(row: QueryRow, extraLabels: Array<[string, string]> = []): CourseDetail[] {
   const labels: Array<[string, string]> = [
     ['course_year', '학년'],
     ['subject_code', '과목코드'],
@@ -109,6 +123,7 @@ function readDetails(row: QueryRow): CourseDetail[] {
     ['category', '이수구분'],
     ['credit_hours', '학점'],
     ['target_year', '대상학년'],
+    ['target_grade', '대상학년'],
     ['professor', '교수'],
     ['capacity', '정원'],
     ['enrolled', '수강인원'],
@@ -123,6 +138,8 @@ function readDetails(row: QueryRow): CourseDetail[] {
     ['classroom', '강의실'],
     ['prereq_subject_codes', '선수과목 코드'],
     ['prereq_subject_names', '선수과목명'],
+    // Phase 8-19: this database's extension fields, with their labels.
+    ...extraLabels,
   ]
 
   return labels.flatMap(([key, label]) => {
@@ -194,7 +211,7 @@ function readFieldSlot(row: QueryRow): Course['slots'] {
   return [{ day, startHour, endHour }]
 }
 
-function rowToCourse(row: QueryRow, index: number): Course {
+function rowToCourse(row: QueryRow, index: number, extraLabels: Array<[string, string]> = []): Course {
   const subjectCode = readString(row, [
     'subject_code',
     'course_code',
@@ -210,13 +227,13 @@ function rowToCourse(row: QueryRow, index: number): Course {
     : `DB-${index + 1}`
   const name =
     readString(row, ['subject_name', 'course_name', 'name', 'title']) ||
-    `Course ${index + 1}`
+    `강좌 ${index + 1}`
   const professor =
     readString(row, ['professor', 'instructor', 'teacher', '교수']) || '-'
   const credits = readNumber(row, ['credit_hours', 'credits', 'credit', '학점']) ?? 0
   const timeText =
     readString(row, ['lecture_time', 'table_schedule', 'time_text', 'time', '시간']) ||
-    'Time TBA'
+    structuredTimeText(readString(row, ['day_of_week', 'day']), readString(row, ['start_time', 'start']), readString(row, ['end_time', 'end']))
   const slots = [
     ...readScheduleSlots(row),
     ...readFieldSlot(row),
@@ -244,7 +261,7 @@ function rowToCourse(row: QueryRow, index: number): Course {
     slots,
     prerequisiteCourseCodes: readStringList(row, ['prereq_subject_codes']),
     prerequisiteCourseNames: readStringList(row, ['prereq_subject_names']),
-    details: readDetails(row),
+    details: readDetails(row, extraLabels),
   }
 }
 
@@ -309,7 +326,7 @@ function mergeCourses(existing: Course, next: Course): Course {
     .split(/\s*,\s*/)
     .filter(Boolean)
   for (const part of next.timeText.split(/\s*,\s*/).filter(Boolean)) {
-    if (part === 'Time TBA' || timeParts.includes(part)) continue
+    if (part === TIME_TBA_TEXT || timeParts.includes(part)) continue
     timeParts.push(part)
   }
   const sortedTimeParts = sortTimeParts(timeParts)
@@ -367,19 +384,35 @@ function mergeTextList(existing?: string, next?: string) {
   return parts.join(', ') || undefined
 }
 
-function rowsToCourses(rows: unknown[]) {
+function rowsToCourses(rows: unknown[], extraLabels: Array<[string, string]> = []) {
   const courses = new Map<string, Course>()
   rows.filter(isQueryRow).forEach((row, index) => {
-    const course = rowToCourse(row, index)
+    const course = rowToCourse(row, index, extraLabels)
     const existing = courses.get(course.id)
     courses.set(course.id, existing ? mergeCourses(existing, course) : course)
   })
   return [...courses.values()]
 }
 
+const LEGACY_CHAT_TARGET: ChatTarget = { kind: 'legacy' }
+
+function chatTargetKey(target: ChatTarget) {
+  if (target.kind === 'queryir') return `queryir:${target.databaseId}`
+  if (target.kind === 'unsupported') return `unsupported:${target.label}`
+  return 'legacy'
+}
+
+function chatTargetCaption(target: ChatTarget) {
+  // Phase 9-38: 학생 화면에는 구현 경로를 노출하지 않는다.
+  if (target.kind === 'queryir') return `${target.label}`
+  if (target.kind === 'unsupported') return `${target.label} · 챗봇 미지원`
+  return '기본 DB · 기존 챗봇'
+}
+
 export default function ChatPopup({
   open,
   onClose,
+  chatTarget = LEGACY_CHAT_TARGET,
   userStudentNo,
   selectedCourses,
   selectedIds,
@@ -388,9 +421,11 @@ export default function ChatPopup({
   onRemoveCourse,
   onReplaceCourse,
   onOpenExpandedTimetable,
+  modelRevision = 0,
 }: {
   open: boolean
   onClose: () => void
+  chatTarget?: ChatTarget
   userStudentNo?: string
   selectedCourses: Course[]
   selectedIds: Set<string>
@@ -399,6 +434,7 @@ export default function ChatPopup({
   onRemoveCourse: (courseId: string) => void
   onReplaceCourse: (course: Course) => void
   onOpenExpandedTimetable: () => void
+  modelRevision?: number
 }) {
   const [mounted, setMounted] = useState(false)
   const [visible, setVisible] = useState(false)
@@ -419,6 +455,13 @@ export default function ChatPopup({
   const [excludeCompletedCourses, setExcludeCompletedCourses] = useState(false)
   const [guidelineOpen, setGuidelineOpen] = useState(true)
   const [sqlOpen, setSqlOpen] = useState(true)
+  const [lastUnderstood, setLastUnderstood] = useState('')
+  // Phase 9-08: the QueryIR chat's model choices (null until loaded) and the pick.
+  const [chatModels, setChatModels] = useState<ChatModelOption[] | null>(null)
+  const [chatModel, setChatModel] = useState<string | null>(null)
+  const isQueryIr = chatTarget.kind === 'queryir'
+  const targetKey = chatTargetKey(chatTarget)
+  const targetKeyRef = useRef(targetKey)
 
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -442,6 +485,79 @@ export default function ChatPopup({
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [mounted, onClose])
+
+  // A different database answers differently: drop the previous answer and say so.
+  // Layout effect: the ref flips during commit, before any pending answer resolves.
+  useLayoutEffect(() => {
+    if (targetKeyRef.current === targetKey) return
+    targetKeyRef.current = targetKey
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoading(false)
+    setDbCourses(null)
+    setLastSql('')
+    setLastWarning('')
+    setLastError('')
+    setLastUnderstood('')
+    // Restoring the stored selection on page load is not a change the user made.
+    setMessages((prev) =>
+      prev.some((message) => message.role === 'user')
+        ? [
+            ...prev,
+            {
+              id: makeId('sys'),
+              role: 'system',
+              text: `질의 대상이 바뀌었습니다: ${chatTargetCaption(chatTarget)}`,
+            },
+          ]
+        : prev,
+    )
+  }, [targetKey, chatTarget])
+
+  useEffect(() => {
+    if (!mounted || !isQueryIr || chatModels !== null) return
+    const controller = new AbortController()
+    fetchChatModels((url, init) => fetch(url, init), { signal: controller.signal })
+      .then((listing) => {
+        setChatModels(listing.models)
+        setChatModel((current) =>
+          current !== null && listing.models.some((option) => option.id === current) ? current : listing.defaultId,
+        )
+      })
+      .catch(() => {
+        // Without a listing the server's default model answers.
+        if (!controller.signal.aborted) setChatModels([])
+      })
+    return () => controller.abort()
+  }, [mounted, isQueryIr, chatModels])
+
+  useEffect(() => {
+    if (!mounted || !isQueryIr || modelRevision === 0) return
+    const controller = new AbortController()
+    fetchChatModels((url, init) => fetch(url, init), { signal: controller.signal })
+      .then((listing) => {
+        setChatModels(listing.models)
+        setChatModel((current) => current !== null && listing.models.some((option) => option.id === current) ? current : listing.defaultId)
+      })
+      .catch(() => {
+        if (controller.signal.aborted) return
+        // Luna 9-31: a removed model must not stay selected; the server's default answers.
+        setChatModels([])
+        setChatModel(null)
+        setLastError('챗봇 모델 목록을 새로 고치지 못했습니다. 기본 모델로 답합니다.')
+      })
+    return () => controller.abort()
+  }, [mounted, isQueryIr, modelRevision])
+
+  function changeChatModel(id: string) {
+    const option = chatModels?.find((item) => item.id === id)
+    if (option === undefined || id === chatModel) return
+    setChatModel(id)
+    setMessages((prev) => [
+      ...prev,
+      { id: makeId('sys'), role: 'system', text: `다음 질문부터 이 모델이 답합니다: ${describeChatModel(option)}` },
+    ])
+  }
 
   useEffect(() => {
     if (!mounted) return
@@ -487,7 +603,20 @@ export default function ChatPopup({
     setInput('')
     setLastError('')
     setLastWarning('')
+    setLastUnderstood('')
     setDbCourses(null)
+
+    if (chatTarget.kind === 'unsupported') {
+      setLastError(
+        `${chatTarget.label}은(는) AI 수강 도우미를 지원하지 않습니다. DB 변경에서 다른 DB를 골라 주세요.`,
+      )
+      return
+    }
+
+    if (chatTarget.kind === 'queryir') {
+      await sendQueryIr(text, chatTarget.databaseId)
+      return
+    }
 
     if (excludeCompletedCourses && !userStudentNo) {
       setLastError('수강 이력 과목 제외는 로그인 후 사용할 수 있습니다.')
@@ -502,6 +631,7 @@ export default function ChatPopup({
     setLoading(true)
     const controller = new AbortController()
     abortRef.current = controller
+    const requestKey = targetKeyRef.current
 
     try {
       const token = getAccessToken()
@@ -518,6 +648,7 @@ export default function ChatPopup({
         signal: controller.signal,
       })
       const payload = (await res.json()) as QueryApiResponse
+      if (controller.signal.aborted || targetKeyRef.current !== requestKey) return
 
       if (!res.ok || payload.error) {
         const errorText =
@@ -539,7 +670,6 @@ export default function ChatPopup({
       setLastSql(payload.sql ?? '')
       setLastWarning(payload.warning ?? '')
 
-      const rowCount = Array.isArray(payload.data) ? payload.data.length : 0
       const nextDbCourses =
         !payload.warning && Array.isArray(payload.data)
           ? rowsToCourses(payload.data)
@@ -547,7 +677,7 @@ export default function ChatPopup({
       setDbCourses(nextDbCourses)
       const summary = payload.warning
         ? 'SQL 생성 완료 (DB 미연결로 결과 조회는 생략되었습니다).'
-        : `SQL 실행 완료: ${rowCount}건 결과를 받았습니다.`
+        : `조회 완료: 강좌 ${nextDbCourses?.length ?? 0}개를 찾았습니다.`
 
       setMessages((prev) => [
         ...prev,
@@ -561,6 +691,7 @@ export default function ChatPopup({
       if (error instanceof DOMException && error.name === 'AbortError') {
         return
       }
+      if (controller.signal.aborted || targetKeyRef.current !== requestKey) return
       const errorText = '백엔드 연결에 실패했습니다. 서버 실행 상태를 확인해주세요.'
       setLastError(errorText)
       setDbCourses(null)
@@ -573,8 +704,53 @@ export default function ChatPopup({
         },
       ])
     } finally {
-      abortRef.current = null
-      setLoading(false)
+      if (abortRef.current === controller) {
+        abortRef.current = null
+        setLoading(false)
+      }
+    }
+  }
+
+  async function sendQueryIr(text: string, databaseId: string) {
+    setMessages((prev) => [...prev, { id: makeId('usr'), role: 'user', text }])
+    setLastSql('')
+    setLoading(true)
+    const controller = new AbortController()
+    abortRef.current = controller
+    const requestKey = targetKeyRef.current
+    try {
+      const answer = await postChatQuery(
+        (url, init) => fetch(url, init),
+        databaseId,
+        text,
+        { signal: controller.signal, ...(chatModel === null ? {} : { model: chatModel }) },
+      )
+      // The user may have switched databases while the model was answering.
+      if (controller.signal.aborted || targetKeyRef.current !== requestKey) return
+      const nextDbCourses = answer.status === 'SUCCEEDED'
+        ? rowsToCourses(
+            chatRowsToLegacyRows(answer.rows),
+            (answer.extensions ?? []).map((item): [string, string] => [item.key, item.label]),
+          )
+        : null
+      setDbCourses(nextDbCourses)
+      setLastUnderstood(answer.status === 'SUCCEEDED' ? describeUnderstood(answer.filters) : '')
+      setLastSql(answer.status === 'SUCCEEDED' ? (answer.sql ?? '') : '')
+      if (answer.status !== 'SUCCEEDED') setLastWarning(describeAnswer(answer))
+      else setLastWarning(answerWarning(answer))
+      setMessages((prev) => [...prev, { id: makeId('sys'), role: 'system', text: describeAnswer(answer, { courseCount: nextDbCourses?.length ?? 0 }) }])
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      if (controller.signal.aborted || targetKeyRef.current !== requestKey) return
+      const errorText = chatErrorMessage(error)
+      setLastError(errorText)
+      setDbCourses(null)
+      setMessages((prev) => [...prev, { id: makeId('sys'), role: 'system', text: `요청 실패: ${errorText}` }])
+    } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null
+        setLoading(false)
+      }
     }
   }
 
@@ -584,7 +760,7 @@ export default function ChatPopup({
     <div className="fixed inset-0 z-50 flex items-end justify-end p-4 sm:p-6">
       <button
         type="button"
-        aria-label="Close assistant"
+        aria-label="도우미 닫기"
         onClick={onClose}
         className={cn(
           'absolute inset-0 bg-slate-900/30 backdrop-blur-[1px] transition-opacity duration-200',
@@ -599,15 +775,28 @@ export default function ChatPopup({
         )}
         role="dialog"
         aria-modal="true"
-        aria-label="AI Course Assistant"
+        aria-label="AI 수강 도우미"
       >
         <div className="shrink-0 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-slate-900">
-              AI Course Assistant
+              AI 수강 도우미
             </div>
             <div className="text-xs text-slate-500">
-              Course search · timetable preview
+              강좌 검색 · 시간표 미리보기
+            </div>
+            <div
+              className={cn(
+                'mt-0.5 text-[11px] font-semibold',
+                chatTarget.kind === 'queryir'
+                  ? 'text-violet-700'
+                  : chatTarget.kind === 'unsupported'
+                    ? 'text-amber-700'
+                    : 'text-slate-500',
+              )}
+              data-testid="chat-target"
+            >
+              {chatTargetCaption(chatTarget)}
             </div>
           </div>
           <button
@@ -655,13 +844,34 @@ export default function ChatPopup({
             <label className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700">
               <input
                 type="checkbox"
-                checked={excludeCompletedCourses}
+                checked={chatTarget.kind === 'legacy' && excludeCompletedCourses}
                 onChange={(event) => setExcludeCompletedCourses(event.target.checked)}
-                disabled={loading}
+                disabled={loading || chatTarget.kind !== 'legacy'}
                 className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
               />
               수강 이력 존재 과목 제외
+              {chatTarget.kind === 'queryir' ? (
+                <span className="font-normal text-slate-400">(이 DB에서는 미지원)</span>
+              ) : null}
             </label>
+            {isQueryIr && chatModels !== null && chatModels.length > 1 ? (
+              <label className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-700">
+                <span className="shrink-0">모델</span>
+                <select
+                  value={chatModel ?? ''}
+                  onChange={(event) => changeChatModel(event.target.value)}
+                  disabled={loading}
+                  data-testid="chat-model"
+                  className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-xs font-normal text-slate-900 shadow-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
+                >
+                  {chatModels.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {describeChatModel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {loading ? (
               <div
                 className="mb-2 flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700"
@@ -695,7 +905,7 @@ export default function ChatPopup({
               >
                 <span className="inline-flex items-center gap-2">
                   {loading ? <LoadingSpinner /> : null}
-                  {loading ? 'Cancel' : 'Send'}
+                  {loading ? '취소' : '보내기'}
                 </span>
               </button>
             </div>
@@ -717,7 +927,11 @@ export default function ChatPopup({
                     <li>과목명은 가능한 한 정확히 입력해 주세요. 줄임말이나 오타가 있으면 결과가 잘 나오지 않을 수 있습니다.</li>
                     <li>과목명과 학과명은 공식 명칭과 띄어쓰기에 가깝게 입력할수록 정확합니다. 띄어쓰기가 많이 다르면 결과가 누락될 수 있습니다.</li>
                     <li>학과, 학년, 이수구분, 요일처럼 원하는 조건을 함께 적으면 더 정확합니다.</li>
-                    <li>시간은 24시간 형식으로 적어 주세요. 예: 오전 2시는 2시, 오후 2시는 14시.</li>
+                    <li>
+                      {chatTarget.kind === 'queryir'
+                        ? QUERYIR_TIME_GUIDE
+                        : '시간은 24시간 형식으로 적어 주세요. 예: 오전 2시는 2시, 오후 2시는 14시.'}
+                    </li>
                     <li>현재는 SQL 질의문으로 조회 가능한 조건만 처리합니다.</li>
                     <li>현재 시간표의 빈 시간에 맞는 강의 추천, 남은 학점에 따른 자동 추천처럼 개인 상황을 해석하는 요청은 아직 지원하지 않습니다.</li>
                   </ul>
@@ -742,6 +956,14 @@ export default function ChatPopup({
                 {lastError}
               </div>
             )}
+            {lastUnderstood && (
+              <div
+                className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800"
+                data-testid="chat-understood"
+              >
+                <span className="font-semibold">이해한 조건</span>: {lastUnderstood}
+              </div>
+            )}
             {lastSql && (
               <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50">
                 <button
@@ -750,7 +972,11 @@ export default function ChatPopup({
                   className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[11px] font-semibold text-slate-600 transition hover:bg-slate-100"
                   aria-expanded={sqlOpen}
                 >
-                  <span>Generated SQL</span>
+                  <span>
+                    {chatTarget.kind === 'queryir'
+                      ? 'Executed SQL (QueryIR · 값은 보기용으로 채워 넣음)'
+                      : 'Generated SQL'}
+                  </span>
                   <span className="text-slate-400">
                     {sqlOpen ? '접기' : '펼치기'}
                   </span>
@@ -768,10 +994,10 @@ export default function ChatPopup({
             <div className="border-t border-slate-200 px-4 py-3">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-semibold text-slate-700">
-                  Course results
+                  검색 결과
                 </div>
                 <div className="text-xs text-slate-500">
-                  {results.length} items
+                  {results.length}개
                 </div>
               </div>
               <div className="mt-2 max-h-72 min-h-36 space-y-2 overflow-y-auto pr-1">
@@ -809,17 +1035,17 @@ export default function ChatPopup({
                         </div>
                         <div className="truncate text-xs text-slate-500">
                           {c.professor} · {c.timeText}
-                          {c.locationText ? ` · Location: ${c.locationText}` : ''}
+                          {c.locationText ? ` · 강의실: ${c.locationText}` : ''}
                         </div>
                         <div className="mt-1 flex flex-wrap gap-1">
                           {closed ? (
                             <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
-                              Capacity warning
+                              정원 주의
                             </span>
                           ) : null}
                           {unmetPrerequisite ? (
                             <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
-                              Prerequisite warning
+                              선수과목 주의
                             </span>
                           ) : null}
                         </div>
@@ -851,7 +1077,7 @@ export default function ChatPopup({
                               : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
                         )}
                       >
-                        {already ? 'Remove' : hasConflict ? 'Replace' : 'Add'}
+                        {already ? '빼기' : hasConflict ? '바꾸기' : '담기'}
                       </button>
                     </div>
                   )
@@ -863,10 +1089,10 @@ export default function ChatPopup({
           <div className="border-t border-slate-200 bg-white px-4 py-4">
             <div className="mb-2 flex items-center justify-between">
               <div className="text-xs font-semibold text-slate-700">
-                Mini timetable
+                미리 보는 시간표
               </div>
               <div className="text-xs text-slate-500">
-                {selectedCourses.length} selected
+                {selectedCourses.length}개 담음
               </div>
             </div>
             <Timetable
@@ -882,4 +1108,3 @@ export default function ChatPopup({
     </div>
   )
 }
-

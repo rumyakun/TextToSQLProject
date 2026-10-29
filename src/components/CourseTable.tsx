@@ -2,6 +2,7 @@ import type { Course } from '../types/course'
 import { cn } from '../utils/cn'
 import { hasUnmetPrerequisite } from '../utils/prerequisites'
 import { getConflictingCourseIds } from '../utils/schedule'
+import { courseTableHeader } from './courseTableHeader'
 
 const statusStyles: Record<Course['status'], string> = {
   Open: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
@@ -26,6 +27,7 @@ function departmentColor({
 
 export default function CourseTable({
   courses,
+  totalCount,
   selectedIds,
   selectedCourses,
   completedCourseCodes,
@@ -35,6 +37,7 @@ export default function CourseTable({
   onReplaceCourse,
 }: {
   courses: Course[]
+  totalCount?: number
   selectedIds: Set<string>
   selectedCourses: Course[]
   completedCourseCodes: Set<string> | null
@@ -43,19 +46,21 @@ export default function CourseTable({
   onHoverCourse: (course: Course | null) => void
   onReplaceCourse: (course: Course) => void
 }) {
+  const header = courseTableHeader(courses.length, totalCount)
   return (
     <div className="flex max-h-[calc(100vh-8.5rem)] min-h-[28rem] flex-col rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-4">
         <div>
           <div className="text-sm font-semibold text-slate-900">
-            Course List
+            강좌 목록
           </div>
           <div className="text-xs text-slate-500">
-            {courses.length} courses
+            {header.count}
           </div>
+          {header.hint ? <div className="mt-1 text-xs text-slate-500">{header.hint}</div> : null}
         </div>
         <div className="text-xs text-slate-500">
-          Selected: <span className="font-semibold">{selectedIds.size}</span>
+          선택: <span className="font-semibold">{selectedIds.size}</span>
         </div>
       </div>
 
@@ -63,14 +68,14 @@ export default function CourseTable({
         <table className="w-full min-w-[1040px] table-auto">
           <thead className="sticky top-0 z-[1] bg-slate-50 text-left text-xs font-semibold text-slate-600 shadow-[0_1px_0_0_rgba(226,232,240,1)]">
             <tr>
-              <th className="px-5 py-3">Action</th>
-              <th className="px-5 py-3">Course Name</th>
-              <th className="px-5 py-3">Professor</th>
-              <th className="px-5 py-3">Time</th>
-              <th className="px-5 py-3">Credits</th>
-              <th className="px-5 py-3">Enrolled</th>
-              <th className="px-5 py-3">Capacity</th>
-              <th className="px-5 py-3">Status</th>
+              <th className="px-5 py-3">선택</th>
+              <th className="px-5 py-3">과목명</th>
+              <th className="px-5 py-3">교수</th>
+              <th className="px-5 py-3">시간</th>
+              <th className="px-5 py-3">학점</th>
+              <th className="px-5 py-3">수강 인원</th>
+              <th className="px-5 py-3">정원</th>
+              <th className="px-5 py-3">상태</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-sm">
@@ -119,7 +124,7 @@ export default function CourseTable({
                             : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
                       )}
                     >
-                      {selected ? 'REMOVE' : hasConflict ? 'REPLACE' : 'ADD'}
+                      {selected ? '빼기' : hasConflict ? '바꾸기' : '담기'}
                     </button>
                   </td>
                   <td className="px-5 py-4">
@@ -145,12 +150,12 @@ export default function CourseTable({
                         <div className="mt-1 flex flex-wrap gap-1">
                           {closed ? (
                             <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 ring-1 ring-slate-200">
-                              Capacity warning
+                              정원 주의
                             </span>
                           ) : null}
                           {unmetPrerequisite ? (
                             <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
-                              Prerequisite warning
+                              선수과목 주의
                             </span>
                           ) : null}
                         </div>
@@ -162,18 +167,18 @@ export default function CourseTable({
                     <div>{c.timeText}</div>
                     {c.locationText ? (
                       <div className="mt-1 text-xs text-slate-500">
-                        Location: {c.locationText}
+                        강의실: {c.locationText}
                       </div>
                     ) : null}
                   </td>
                   <td className="px-5 py-4 text-slate-700">
-                    {c.credits > 0 ? c.credits : 'TBA'}
+                    {c.credits > 0 ? c.credits : '-'}
                   </td>
                   <td className="px-5 py-4 text-slate-700">
-                    {typeof c.enrolled === 'number' ? c.enrolled : 'TBA'}
+                    {typeof c.enrolled === 'number' ? c.enrolled : '-'}
                   </td>
                   <td className="px-5 py-4 text-slate-700">
-                    {typeof c.capacity === 'number' ? c.capacity : 'TBA'}
+                    {typeof c.capacity === 'number' ? c.capacity : '-'}
                   </td>
                   <td className="px-5 py-4">
                     <span
@@ -182,7 +187,7 @@ export default function CourseTable({
                         statusStyles[c.status],
                       )}
                     >
-                      {c.status}
+                      {closed ? '마감' : '여석 있음'}
                     </span>
                   </td>
                 </tr>
