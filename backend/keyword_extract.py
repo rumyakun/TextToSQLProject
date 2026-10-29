@@ -61,6 +61,96 @@ COMMON_ALIASES = {
         "컴융": ["컴퓨터융합학부", "공과대학 컴퓨터융합학부"],
         "컴융부": ["컴퓨터융합학부", "공과대학 컴퓨터융합학부"],
         "인공지능": ["컴퓨터인공지능학부"],
+        ## Task 7: reviewed candidates from infer_abbreviations.py against the live DB
+        ## (see backend/course_custom_ner_model/metadata/abbreviation_candidates.reviewed.json)
+        "컴퓨터인공지": ["공과대학 컴퓨터인공지능학부"],
+        "컴퓨터인공지학": ["공과대학 컴퓨터인공지능학부"],
+        "지역환토": ["농업생명과학대학 지역환경토목학과"],
+        "지역환토학": ["농업생명과학대학 지역환경토목학과"],
+        "천문우주과": ["자연과학대학 천문우주과학과"],
+        "무역": ["경상대학 무역학과"],
+        "무역학": ["경상대학 무역학과"],
+        "화공과": ["공과대학 응용화학공학과"],
+        "국어교": ["사범대학 국어교육과"],
+        "국사": ["인문대학 국사학과"],
+        "국사학": ["인문대학 국사학과"],
+        "사복지": ["사회과학대학 사회복지학과"],
+        "사복지학": ["사회과학대학 사회복지학과"],
+        "농생융": ["농업생명과학대학 농생명융합학부"],
+        "신소공": ["공과대학 신소재공학과"],
+        "식물": ["농업생명과학대학 식물자원학과"],
+        "식물학": ["농업생명과학대학 식물자원학과"],
+        "소비자": ["생활과학대학 소비자학과"],
+        "소비자학": ["생활과학대학 소비자학과"],
+        "기교": ["사범대학 기술교육과"],
+        "유기재료공": ["공과대학 유기재료공학과"],
+        "항공우주공": ["공과대학 항공우주공학과"],
+        "지질환과": ["자연과학대학 지질환경과학과"],
+        "한문": ["인문대학 한문학과"],
+        "중어중문": ["인문대학 중어중문학과"],
+        "고고": ["인문대학 고고학과"],
+        "고고학": ["인문대학 고고학과"],
+        "메카트로닉스공": ["공과대학 메카트로닉스공학과"],
+        "영어영문": ["인문대학 영어영문학과"],
+        "생환화": ["농업생명과학대학 생물환경화학과"],
+        "전자공": ["공과대학 전자공학과"],
+        "독어독문": ["인문대학 독어독문학과"],
+        "바시기": ["농업생명과학대학 바이오시스템기계공학과"],
+        "바시기과": ["농업생명과학대학 바이오시스템기계공학과"],
+        "환공": ["공과대학 환경공학과"],
+        "산림환자": ["농업생명과학대학 산림환경자원학과"],
+        "산림환자학": ["농업생명과학대학 산림환경자원학과"],
+        "건공과": ["공과대학 토목공학과"],
+        "식품영양": ["생활과학대학 식품영양학과"],
+        "식품영양학": ["생활과학대학 식품영양학과"],
+        "반도체융": ["자연과학대학 반도체융합학과"],
+        "원예": ["농업생명과학대학 원예학과"],
+        "원예학": ["농업생명과학대학 원예학과"],
+        "일어일문": ["인문대학 일어일문학과"],
+        "동자생": ["농업생명과학대학 동물자원생명과학과"],
+        "동자생과": ["농업생명과학대학 동물자원생명과학과"],
+        "농경제": ["농업생명과학대학 농업경제학과"],
+        "농경제과": ["농업생명과학대학 농업경제학과"],
+        "에너지공": ["공과대학 에너지공학과"],
+        "불어불문": ["인문대학 불어불문학과"],
+        "컴퓨터융": ["공과대학 컴퓨터융합학부"],
+        "언론정": ["사회과학대학 언론정보학과"],
+        "동바시": ["농업생명과학대학 동물바이오시스템과학과"],
+        "환소공": ["농업생명과학대학 환경소재공학과"],
+        "물리": ["자연과학대학 물리학과"],
+        "물리학": ["자연과학대학 물리학과"],
+        "언어": ["인문대학 언어학과"],
+        "언어학": ["인문대학 언어학과"],
+        "응화공": ["공과대학 응용화학공학과"],
+        "심리": ["사회과학대학 심리학과"],
+        "심리학": ["사회과학대학 심리학과"],
+        "스농시기": ["농업생명과학대학 스마트농업시스템기계공학과"],
+        "스농시기과": ["농업생명과학대학 스마트농업시스템기계공학과"],
+        "생정융": ["생명시스템과학대학 생명정보융합학과"],
+        "스포츠과": ["자연과학대학 스포츠과학과"],
+        "정치외교": ["사회과학대학 정치외교학과"],
+        "정치외교학": ["사회과학대학 정치외교학과"],
+        "국어국문": ["인문대학 국어국문학과"],
+        "해양환과": ["자연과학대학 해양환경과학과"],
+        "자율운항시공": ["공과대학 자율운항시스템공학과"],
+        "간호": ["간호대학 간호학과"],
+        "간호학": ["간호대학 간호학과"],
+        "생화": ["자연과학대학 생화학과"],
+        "응생": ["농업생명과학대학 응용생물학과"],
+        "응생학": ["농업생명과학대학 응용생물학과"],
+        "동자과": ["농업생명과학대학 동물자원과학부"],
+        "동자과부": ["농업생명과학대학 동물자원과학부"],
+        "경제": ["경상대학 경제학과"],
+        "경제과": ["경상대학 경제학과"],
+        "의류": ["생활과학대학 의류학과"],
+        "의류학": ["생활과학대학 의류학과"],
+        "토공": ["공과대학 토목공학과"],
+        "식품공": ["농업생명과학대학 식품공학과"],
+        "체육교": ["사범대학 체육교육과"],
+        "의예과": ["의과대학 의예과"],
+        "조소과": ["예술대학 조소과"],
+        "행정": ["사회과학대학 행정학부"],
+        "행정학": ["사회과학대학 행정학부"],
     },
     "CATEGORY": {
         "전기": ["전공(기초)"],
@@ -99,6 +189,36 @@ KOREAN_PARTICLES = (
     "도",
     "만",
 )
+
+# Particles that are safe to trim off the END OF A PREDICTED SPAN. This is a
+# deliberately smaller list than KOREAN_PARTICLES above, which is only used to
+# build fuzzy-match variants and can afford false positives. Two filters
+# produced it:
+#   1. It must never end a real entity. 과(160 labeled entities), 는(28),
+#      가(23), 은(10) and 의(1) all do — trimming those would corrupt 학과
+#      names, VACANCY phrases and EVAL_TYPE values.
+#   2. It must not be mistakable for a word's final syllable. That rules out
+#      the remaining single-character particles (이/을/를/와/랑/로/도/만):
+#      trimming 이 turned the span '3시 사이' into '3시 사'. Telling those
+#      apart from word endings needs morphological analysis we don't have
+#      here, and on the holdout they fixed nothing that 에/에서 didn't.
+# Ordered longest-first so 에서 wins over 에.
+SPAN_TRIM_PARTICLES = (
+    "이랑",
+    "으로",
+    "부터",
+    "까지",
+    "에서",
+    "에",
+)
+
+# Trailing junk the tokenizer tends to pull into a span. ')' is deliberately
+# absent: 152 labeled entities end with it (e.g. 전공(핵심)).
+SPAN_TRIM_CHARS = " \t~,./;:!?-"
+
+# The only legitimately single-character entities in the labeled data are
+# weekday abbreviations, all of them DAY.
+WEEKDAY_CHARS = frozenset("월화수목금토일")
 
 _predictor_lock = threading.Lock()
 _predictor: "CourseNERPredictor | None" = None
@@ -326,6 +446,82 @@ def strip_korean_particle(value: str) -> str:
     return stripped
 
 
+def trim_entity_span(text: str, start: int, end: int) -> tuple[int, int]:
+    while end > start and text[end - 1] in SPAN_TRIM_CHARS:
+        end -= 1
+    while start < end and text[start] in SPAN_TRIM_CHARS:
+        start += 1
+
+    span = text[start:end]
+    for particle in SPAN_TRIM_PARTICLES:
+        if span.endswith(particle) and len(span) - len(particle) >= 2:
+            end -= len(particle)
+            break
+
+    while end > start and text[end - 1] in SPAN_TRIM_CHARS:
+        end -= 1
+
+    return start, end
+
+
+def is_noise_span(span: str, label: str) -> bool:
+    if not span:
+        return True
+    if span in SPAN_TRIM_PARTICLES:
+        return True
+    if len(span) == 1:
+        return not (label == "DAY" and span in WEEKDAY_CHARS)
+    return False
+
+
+def postprocess_entities(entities: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Drop tokenizer artifacts and trailing particles from predicted spans.
+
+    The model over-predicts: on the real-query holdout its recall (0.83) runs
+    well ahead of its precision (0.68), and most of the gap is single-character
+    fragments and particles tagged as entities. Left in place they become bogus
+    SQL filters, since correct_ner_entities() never drops an entity.
+    """
+    cleaned: list[dict[str, Any]] = []
+
+    for entity in entities:
+        start, end = trim_entity_span(text, int(entity["start"]), int(entity["end"]))
+        span = text[start:end]
+
+        if is_noise_span(span, entity["label"]):
+            continue
+
+        cleaned.append({**entity, "text": span, "start": start, "end": end})
+
+    return cleaned
+
+
+def _squeeze_whitespace(value: str) -> str:
+    return re.sub(r"\s+", "", value)
+
+
+def locate_normalized_span(text: str, target: str) -> tuple[int, int] | None:
+    """Shortest character range in `text` that normalizes to `target`.
+
+    Used to replace only the part of an over-wide entity span that the DB value
+    actually accounts for. Returns None when no range matches.
+    """
+    needle = normalize_for_match(target)
+    if not needle:
+        return None
+
+    best: tuple[int, int] | None = None
+    for start in range(len(text)):
+        for end in range(start + 1, len(text) + 1):
+            if normalize_for_match(text[start:end]) != needle:
+                continue
+            if best is None or (end - start) < (best[1] - best[0]):
+                best = (start, end)
+            break
+
+    return best
+
+
 def is_sequential_match(query: str, target: str) -> bool:
     """
     Checks if query characters appear in target in the same order.
@@ -440,7 +636,13 @@ def should_apply_match(entity: dict[str, Any], match: MatchResult) -> bool:
         return False
 
     if source == target:
-        return True
+        # Normalising already made these equal, so they differ only in
+        # whitespace, punctuation or case. A punctuation or case difference is
+        # worth fixing ('전공핵심' -> '전공(핵심)', 'grade' -> 'GRADE'), but
+        # rewriting purely for spacing ('컴퓨터프로그래밍3' ->
+        # '컴퓨터프로그래밍 3') tells the DB nothing new while changing what
+        # the LLM sees, which cost a prerequisite case in the eval set.
+        return _squeeze_whitespace(entity["text"]) != _squeeze_whitespace(match.text)
 
     # Very short spans are easy to over-correct unless they are aliases or strong matches.
     if len(source) <= 2 and match.score < 95:
@@ -464,9 +666,23 @@ def correct_ner_entities(
         apply_match = should_apply_match(entity, match)
         corrected_text = match.text if apply_match and match.text else entity["text"]
 
+        # Replace only the slice of the span the matched value accounts for.
+        # A boundary error like '데이터베이스 관련' used to have '관련' deleted
+        # along with the rest of the span. Offsets are optional: this is also
+        # called with bare {text, label} dicts.
+        span_offsets: dict[str, int] = {}
+        if apply_match and entity.get("start") is not None:
+            covered = locate_normalized_span(entity["text"], corrected_text)
+            if covered:
+                span_offsets = {
+                    "corrected_start": int(entity["start"]) + covered[0],
+                    "corrected_end": int(entity["start"]) + covered[1],
+                }
+
         corrected_entities.append(
             {
                 **entity,
+                **span_offsets,
                 "corrected_text": corrected_text,
                 "matched_table": ENTITY_REFERENCE_MAP.get(label, (None, None))[0],
                 "matched_column": ENTITY_REFERENCE_MAP.get(label, (None, None))[1],
@@ -488,8 +704,10 @@ def build_corrected_query(query: str, corrected_entities: list[dict[str, Any]]) 
         if any(not (end <= used_start or start >= used_end) for used_start, used_end in used_ranges):
             continue
 
+        replace_start = int(entity.get("corrected_start", start))
+        replace_end = int(entity.get("corrected_end", end))
         corrected_text = entity.get("corrected_text", entity["text"])
-        corrected_query = corrected_query[:start] + corrected_text + corrected_query[end:]
+        corrected_query = corrected_query[:replace_start] + corrected_text + corrected_query[replace_end:]
         used_ranges.append((start, end))
 
     return corrected_query
@@ -554,7 +772,7 @@ def preprocess_query(
     try:
         predictor = get_predictor(model_dir=model_dir, max_length=max_length)
         references = load_reference_values()
-        entities = predictor.extract(query)
+        entities = postprocess_entities(predictor.extract(query), query)
         corrected_entities = correct_ner_entities(entities, references)
         corrected_query = build_corrected_query(query, corrected_entities)
         masked_query = build_masked_query(query, entities)
